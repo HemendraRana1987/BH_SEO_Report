@@ -3,7 +3,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, parse_qs, urlencode,urlunparse
 from dataclasses import dataclass, field
 from typing import List, Dict, Set, Union
 import time
@@ -105,7 +105,7 @@ SITES = [
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml",
         ],
         output_dir='BeautifulHomes_broken_links_reports',
-        recipients=['bhuwan.pandey@deptagency.com','gaurang.kapadia@deptagency.com'],
+        recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com '],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'
     ),
     SiteConfig(
@@ -130,7 +130,7 @@ SITES = [
             "https://www.asianpaints.com/sitemap-web-stories.xml",
         ],
         output_dir='AsianPaints_broken_links_reports',
-        recipients=['bhuwan.pandey@deptagency.com','gaurang.kapadia@deptagency.com'],
+        recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
         zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip'
     )
 ]
@@ -330,8 +330,32 @@ def fetch_sitemap_urls(sitemap_url: str) -> List[str]:
             soup = BeautifulSoup(response.text, 'xml')
             urls = [url.text for url in soup.find_all('loc')]
             response.close()
-            logger.info(f"Fetched {len(urls)} URLs from sitemap")
-            return urls
+            updated_urls = []
+            for url in urls:
+                parsed = urlparse(url)
+
+                # keep any existing query params
+                query_params = parse_qs(parsed.query)
+
+                # add your required param
+                query_params["qaAutomation"] = ["true"]
+
+                # rebuild query string
+                new_query = urlencode(query_params, doseq=True)
+
+                # reconstruct final URL
+                updated_url = urlunparse((
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path,
+                    parsed.params,
+                    new_query,
+                    parsed.fragment
+                ))
+
+                updated_urls.append(updated_url)
+            logger.info(f"Fetched {len(updated_urls)} URLs from sitemap")
+            return updated_urls
     except Exception as e:
         logger.error(f"Error fetching sitemap {sitemap_url}: {str(e)}")
         return []
