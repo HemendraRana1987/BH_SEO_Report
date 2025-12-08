@@ -58,6 +58,7 @@ class LinkResult:
     url: str
     status_code: int | str
     text: str = ""
+    next_tag_data: str = ""  # NEW: Store next tag data for 404 images
 
 @dataclass
 class PageResult:
@@ -87,12 +88,11 @@ USER_AGENTS = [
 # Email configuration
 EMAIL_CONFIG = EmailConfig()
 
-# Site configurations - FIXED zip filenames (removed forward slashes)
+# Site configurations
 SITES = [
     SiteConfig(
         name="BeautifulHomes",
         sitemaps=[
-            
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
     "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml",
     "https://www.beautifulhomes.asianpaints.com/en.sitemap.store-locator-sitemap.xml",
@@ -100,12 +100,12 @@ SITES = [
     "https://www.beautifulhomes.asianpaints.com/en.sitemap.magazine-sitemap.xml",
     "https://www.beautifulhomes.asianpaints.com/en.sitemap.web-stories-sitemap.xml",
     "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
-    "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml"
+    "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml",
         ],
         output_dir='BeautifulHomes_broken_links_reports',
-       # recipients=['bhuwan.pandey@deptagency.com','gaurang.kapadia@deptagency.com','sudha.murthy@deptagency.com'],
-        recipients=['arjun.kulkarni@asianpaints.com','abhishek.sarma@asianpaints.com','ankita.singh@asianpaints.com ','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','sudha.murthy@deptagency.com'],
-        zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'  # FIXED: removed forward slash
+        recipients=['bhuwan.pandey@deptagency.com'],
+        #recipients=['bhuwan.pandey@deptagency.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','sudha.murthy@deptagency.com'],
+        zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'
     ),
     SiteConfig(
         name="AsianPaints",
@@ -126,11 +126,12 @@ SITES = [
     "https://www.asianpaints.com/sitemap-main-home-decor.xml",
     "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
     "https://www.asianpaints.com/sitemap-main-decorpro.xml",
-    "https://www.asianpaints.com/sitemap-web-stories.xml"],
+    "https://www.asianpaints.com/sitemap-web-stories.xml",
+        ],
         output_dir='AsianPaints_broken_links_reports',
-        #recipients=['bhuwan.pandey@deptagency.com','gaurang.kapadia@deptagency.com','sudha.murthy@deptagency.com'],
-        recipients=['arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com ','jhalak.mittal@asianpaints.com','silpamohapatra@kpmg.com ','vasiurrahmangh@kpmg.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','sudha.murthy@deptagency.com'],
-        zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip'  # FIXED: removed forward slash
+        recipients=['bhuwan.pandey@deptagency.com'],
+        #recipients=['bhuwan.pandey@deptagency.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','sudha.murthy@deptagency.com'],
+        zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip'
     )
 ]
 
@@ -155,7 +156,7 @@ def get_session():
     })
     
     retry_strategy = Retry(
-        total=2,  # Increased retries
+        total=2,
         backoff_factor=1,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET", "OPTIONS"]
@@ -198,7 +199,7 @@ def check_url_status(url: str, session: requests.Session) -> int | str:
             time.sleep(random.uniform(0.2, 0.5))
             response = session.get(
                 url, 
-                timeout=(5, 10),
+                timeout=(10, 60),
                 allow_redirects=True,
                 stream=True
             )
@@ -236,6 +237,26 @@ def normalize_url(base_url: str, href: str) -> str | None:
         return urljoin(base_url, href)
     return href
 
+def get_next_sibling_text(element, max_length: int = 200) -> str:
+    """Get text content from the next sibling element"""
+    try:
+        next_sibling = element.find_next_sibling()
+        if next_sibling:
+            text = next_sibling.get_text(strip=True, separator=' ')[:max_length]
+            if text:
+                return text
+            # If next sibling has no text, try to get its tag name and attributes
+            tag_info = f"<{next_sibling.name}"
+            if next_sibling.get('class'):
+                tag_info += f" class='{' '.join(next_sibling.get('class'))}'"
+            if next_sibling.get('id'):
+                tag_info += f" id='{next_sibling.get('id')}'"
+            tag_info += ">"
+            return tag_info
+        return "No next sibling"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 def check_resource_batch(resources: List[tuple], session: requests.Session) -> List[LinkResult]:
     """Check multiple resources in parallel with connection management"""
     results = []
@@ -253,14 +274,16 @@ def check_resource_batch(resources: List[tuple], session: requests.Session) -> L
                 results.append(LinkResult(
                     url=resource[0],
                     status_code=status,
-                    text=resource[1]
+                    text=resource[1],
+                    next_tag_data=resource[2] if len(resource) > 2 else ""  # NEW: Include next tag data
                 ))
             except Exception as e:
                 logger.error(f"Error checking {resource[0]}: {str(e)}")
                 results.append(LinkResult(
                     url=resource[0],
                     status_code="Error",
-                    text=resource[1]
+                    text=resource[1],
+                    next_tag_data=resource[2] if len(resource) > 2 else ""
                 ))
     
     return results
@@ -289,9 +312,9 @@ def process_url(url: str) -> PageResult:
                 if link_url and link_url not in checked_urls:
                     checked_urls.add(link_url)
                     link_text = link.get_text().strip()[:MAX_TEXT_LENGTH] or "No Text"
-                    links_to_check.append((link_url, link_text))
+                    links_to_check.append((link_url, link_text, ""))  # No next tag data for links
             
-            # Collect unique images
+            # Collect unique images WITH next sibling data
             images_to_check = []
             checked_images: Set[str] = set()
             
@@ -300,7 +323,8 @@ def process_url(url: str) -> PageResult:
                 if img_url and img_url not in checked_images:
                     checked_images.add(img_url)
                     alt_text = img.get("alt", "No Alt Text")[:MAX_TEXT_LENGTH]
-                    images_to_check.append((img_url, alt_text))
+                    next_tag_text = get_next_sibling_text(img)  # NEW: Get next tag data
+                    images_to_check.append((img_url, alt_text, next_tag_text))
             
             # Check all resources in parallel with the same session
             broken_links = check_resource_batch(links_to_check, session) if links_to_check else []
@@ -450,13 +474,14 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
         if all_links:
             pd.DataFrame(all_links).to_excel(writer, sheet_name='All Links Details', index=False)
         
-        # All images details
+        # All images details WITH next tag data
         all_images = [
             {
                 "Page URL": r.url,
                 "Image URL": img.url,
                 "Status Code": img.status_code,
                 "Alt Text": img.text,
+                "Next Tag Content": img.next_tag_data if img.status_code == 404 else "",  # NEW: Only show for 404
                 "Status": "Broken" if is_broken_status(img.status_code) else "Working"
             }
             for r in results for img in r.broken_images
@@ -519,7 +544,7 @@ The report contains:
   1. Summary Report - Overview with project name, sitemap URL, scan date/time, and metrics
   2. Pages Overview - List of all pages with issue counts
   3. All Links Details - Complete list of all links with status codes
-  4. All Images Details - Complete list of all images with status codes
+  4. All Images Details - Complete list of all images with status codes and next tag content for 404 errors
 
 Please feel free to review the attached parameters and let us know if you have any questions or concerns.
 
