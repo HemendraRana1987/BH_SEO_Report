@@ -48,7 +48,6 @@ class EmailConfig:
     smtp_server: str = 'smtp.gmail.com'
     smtp_port: int = 587
     username: str = 'hemendra.rana@deptagency.com'
-    # NOTE: It's HIGHLY recommended to use environment variables for passwords.
     password: str = 'azvp nyjw leel rtdt' 
     sender: str = 'hemendra.rana@deptagency.com'
 
@@ -71,13 +70,14 @@ class LinkResult:
 class PageResult:
     url: str
     response_code: Union[int, str]
+    robots_meta: str = ""  # NEW: Store robots meta tag value
     broken_links: List[LinkResult] = field(default_factory=list)
     broken_images: List[LinkResult] = field(default_factory=list)
 
 @dataclass
 class SitemapStatus:
     url: str
-    status: str  # 'SUCCESS', 'FAILED', 'EMPTY'
+    status: str
     urls_found: int
     error_message: str = ""
     timestamp: str = ""
@@ -94,7 +94,7 @@ REQUEST_TIMEOUT = 30
 SITEMAP_TIMEOUT = 45
 MAX_TEXT_LENGTH = 100
 MAX_EMAIL_SIZE_MB = 15
-SESSION_POOL_SIZE = 20 # Increased visibility for clarity
+SESSION_POOL_SIZE = 20
 
 # Enhanced User-Agent rotation
 USER_AGENTS = [
@@ -112,8 +112,7 @@ EMAIL_CONFIG = EmailConfig()
 SITES = [
     SiteConfig(
         name="BeautifulHomes",
-        sitemaps=[
-            "https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
+        sitemaps=["https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.store-locator-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.decor-products-sitemap.xml",
@@ -121,16 +120,16 @@ SITES = [
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.web-stories-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml",
+            
         ],
         output_dir='BeautifulHomes_broken_links_reports',
-       # recipients=['bhuwan.pandey@deptagency.com'],
-        recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com '],
+        #recipients =["Bhuwan.pandey@deptagency.com"],
+       recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com '],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'
     ),
     SiteConfig(
         name="AsianPaints",
-        sitemaps=[
-             "https://www.asianpaints.com/sitemap-main-shop.xml",
+        sitemaps=["https://www.asianpaints.com/sitemap-main-shop.xml",
             "https://www.asianpaints.com/sitemap-main-services.xml",
             "https://www.asianpaints.com/sitemap-main-products.xml",
             "https://www.asianpaints.com/sitemap-main-blogs.xml",
@@ -147,10 +146,11 @@ SITES = [
             "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
             "https://www.asianpaints.com/sitemap-main-decorpro.xml",
             "https://www.asianpaints.com/sitemap-web-stories.xml",
+           
         ],
         output_dir='AsianPaints_broken_links_reports',
-       # recipients=['bhuwan.pandey@deptagency.com'],
-        recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
+        #recipients =["Bhuwan.pandey@deptagency.com"],
+       recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
         zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip'
     )
 ]
@@ -221,6 +221,17 @@ def get_session():
 
 # --- Utility Functions ---
 
+def extract_robots_meta(soup: BeautifulSoup) -> str:
+    """Extract robots meta tag content value"""
+    try:
+        robots_tag = soup.find('meta', attrs={'name': 'robots'})
+        if robots_tag and robots_tag.get('content'):
+            return robots_tag.get('content').strip()
+        return ""
+    except Exception as e:
+        logger.debug(f"Error extracting robots meta: {str(e)}")
+        return ""
+
 def is_broken_status(status_code) -> bool:
     """Check if status code indicates a broken resource"""
     return status_code in BROKEN_STATUS_CODES
@@ -236,12 +247,10 @@ def check_url_status(url: str, session: requests.Session, max_retries: int = 3) 
             
             time.sleep(random.uniform(0.1, 0.3))
             
-            # Use HEAD request first (faster)
             response = session.head(url, timeout=(10, 20), allow_redirects=True)
             status = response.status_code
             response.close()
             
-            # Fallback to GET for common errors like 403 (Forbidden)
             if status in [403, 405] or status >= 500:
                 time.sleep(random.uniform(0.2, 0.5))
                 response = session.get(url, timeout=(15, 30), allow_redirects=True, stream=True)
@@ -264,27 +273,16 @@ def check_url_status(url: str, session: requests.Session, max_retries: int = 3) 
     return "Error"
 
 def normalize_url(base_url: str, href: str) -> Union[str, None]:
-    """
-    Normalize and validate URL.
-    Handles:
-    - Protocol-relative URLs (//)
-    - Relative paths
-    - Absolute paths
-    - Full URLs
-    Converts protocol-relative URLs to https before returning.
-    """
+    """Normalize and validate URL"""
     if not href or href.startswith(SKIP_SCHEMES):
         return None
     
     try:
-        # Handle protocol-relative URLs (e.g., //static.asianpaints.com/path)
         if href.startswith('//'):
-            # Convert to https
             return 'https:' + href
         
         parsed = urlparse(href)
         if not parsed.scheme:
-            # urljoin handles relative paths, absolute paths
             normalized = urljoin(base_url, href)
             return normalized
         
@@ -300,7 +298,6 @@ def get_next_sibling_text(element, max_length: int = 200) -> str:
             text = next_sibling.get_text(strip=True, separator=' ')[:max_length]
             if text:
                 return text
-            # Fallback to tag info if no text is found
             tag_info = f"<{next_sibling.name}"
             if next_sibling.get('class'):
                 tag_info += f" class='{' '.join(next_sibling.get('class'))}'"
@@ -348,23 +345,25 @@ def check_resource_batch(resources: List[tuple], session: requests.Session) -> L
     return results
 
 def process_url(url: str) -> PageResult:
-    """Process single URL: fetch, parse, and check links/images"""
+    """Process single URL: fetch, parse, check robots meta, and check links/images"""
     try:
         with get_session() as session:
-            # Use GET for the page itself as we need content for parsing
             response = session.get(url, allow_redirects=True, timeout=REQUEST_TIMEOUT)
             response_code = response.status_code
             
             if response_code != 200:
                 logger.warning(f"Non-200 response for {url}: {response_code}")
                 response.close()
-                return PageResult(url=url, response_code=response_code)
+                return PageResult(url=url, response_code=response_code, robots_meta="")
             
-            # Use lxml parser if available for speed, fallback to html.parser
             try:
                 soup = BeautifulSoup(response.content, "lxml")
             except:
                 soup = BeautifulSoup(response.content, "html.parser")
+            
+            # Extract robots meta tag
+            robots_meta = extract_robots_meta(soup)
+            
             response.close()
             
             links_to_check = []
@@ -394,13 +393,14 @@ def process_url(url: str) -> PageResult:
             return PageResult(
                 url=url,
                 response_code=response_code,
+                robots_meta=robots_meta,
                 broken_links=broken_links,
                 broken_images=broken_images
             )
             
     except Exception as e:
         logger.error(f"Error processing {url}: {str(e)}")
-        return PageResult(url=url, response_code="Error")
+        return PageResult(url=url, response_code="Error", robots_meta="")
 
 def fetch_sitemap_urls(sitemap_url: str) -> tuple:
     """Fetch URLs from sitemap, inject 'qaAutomation' parameter, and return status object"""
@@ -439,7 +439,6 @@ def fetch_sitemap_urls(sitemap_url: str) -> tuple:
             for url in urls:
                 parsed = urlparse(url)
                 query_params = parse_qs(parsed.query)
-                # Injecting qaAutomation=true
                 query_params["qaAutomation"] = ["true"]
                 new_query = urlencode(query_params, doseq=True)
                 updated_url = urlunparse((
@@ -508,23 +507,32 @@ def process_sitemap(sitemap_url: str, output_dir: str, project_name: str) -> tup
 # --- Reporting and Email Functions ---
 
 def calculate_stats(results: List[PageResult]) -> Dict:
-    """Calculate summary statistics"""
+    """Calculate summary statistics including robots meta tag counts"""
     total_broken_links = sum(len(r.broken_links) for r in results)
     total_broken_images = sum(len(r.broken_images) for r in results)
     pages_with_broken_links = sum(1 for r in results if r.broken_links)
     pages_with_broken_images = sum(1 for r in results if r.broken_images)
+    
+    # Count pages with noindex, nofollow
+    noindex_nofollow_count = 0
+    for r in results:
+        if r.robots_meta:
+            meta_lower = r.robots_meta.lower()
+            if 'noindex' in meta_lower and 'nofollow' in meta_lower:
+                noindex_nofollow_count += 1
     
     return {
         'total_pages': len(results),
         'broken_links': total_broken_links,
         'broken_images': total_broken_images,
         'pages_with_broken_links': pages_with_broken_links,
-        'pages_with_broken_images': pages_with_broken_images
+        'pages_with_broken_images': pages_with_broken_images,
+        'noindex_nofollow_count': noindex_nofollow_count
     }
 
 def save_report(results: List[PageResult], sitemap_url: str, output_dir: str, 
                 project_name: str, scan_datetime: str, scan_time: float):
-    """Save comprehensive Excel report"""
+    """Save comprehensive Excel report with robots meta tag data"""
     if not results:
         return
     
@@ -540,12 +548,14 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
                     "Project Name", "Sitemap URL", "Date & Time of Scan", "Total Pages Checked",
                     "Pages with Broken Links", "Pages with Broken Images",
                     "Total Broken Links (4xx, 5xx errors)", "Total Broken Images (4xx, 5xx errors)",
+                    "Pages with [noindex, nofollow]",
                     "Total Time for Scan (minutes)"
                 ],
                 "Value": [
                     project_name, sitemap_url, scan_datetime, stats['total_pages'],
                     stats['pages_with_broken_links'], stats['pages_with_broken_images'],
                     stats['broken_links'], stats['broken_images'],
+                    stats['noindex_nofollow_count'],
                     f"{scan_time:.2f}"
                 ]
             }).to_excel(writer, sheet_name='Summary Report', index=False)
@@ -555,6 +565,7 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
                 {
                     "URL": r.url,
                     "Page Status Code": r.response_code,
+                    "Robots Meta Tag": r.robots_meta if r.robots_meta else "Not Found",
                     "Broken Links Count": len(r.broken_links),
                     "Broken Images Count": len(r.broken_images)
                 }
@@ -766,7 +777,7 @@ def send_email(subject: str, body: str, recipients: List[str], attachment_path: 
 
 def generate_email_body(site: SiteConfig, stats: Dict, execution_time: float, 
                        zip_filename: str, sitemap_summary: Dict, part_info: str = "") -> str:
-    """Generate email body with sitemap success count"""
+    """Generate email body with sitemap success count and robots meta tag info"""
     part_text = f"\n{part_info}\n" if part_info else ""
     
     return f"""Greetings, {site.name} Team.
@@ -779,12 +790,13 @@ Report Summary:
 - Total Pages Checked: {stats['total_pages']}
 - Total Broken Links Found: {stats['broken_links']}
 - Total Broken Images Found: {stats['broken_images']}
+- Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']}
 - Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes
 
 The report is attached as '{zip_filename}'.
 The report contains:
-  1. Summary Report - Overview with project name, sitemap URL, scan date/time, and metrics
-  2. Pages Overview - List of all pages with issue counts
+  1. Summary Report - Overview with project name, sitemap URL, scan date/time, and metrics including robots meta tag counts
+  2. Pages Overview - List of all pages with robots meta tags and issue counts
   3. Broken Links - Complete list of broken links with status codes
   4. Broken Images - Complete list of broken images with status codes and next tag content for 404 errors
 
@@ -876,6 +888,7 @@ def process_site(site: SiteConfig, global_start_time: float) -> tuple:
     logger.info(f"Pages checked: {stats['total_pages']}")
     logger.info(f"Broken links: {stats['broken_links']}")
     logger.info(f"Broken images: {stats['broken_images']}")
+    logger.info(f"Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']}")
     logger.info(f"Site Execution Time: {site_execution_time:.2f} minutes")
     if error_log_path:
         logger.info(f"Error log: {error_log_path}")
