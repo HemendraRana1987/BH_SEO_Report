@@ -70,7 +70,7 @@ class LinkResult:
 class PageResult:
     url: str
     response_code: Union[int, str]
-    robots_meta: str = ""  # NEW: Store robots meta tag value
+    robots_meta: str = ""
     broken_links: List[LinkResult] = field(default_factory=list)
     broken_images: List[LinkResult] = field(default_factory=list)
 
@@ -87,24 +87,44 @@ class SitemapStatus:
 
 BROKEN_STATUS_CODES = {404, 400, 403, 500, 502, 503, "Timeout/Error", "Error"}
 SKIP_SCHEMES = ('javascript:', 'mailto:', 'tel:', '#')
-MAX_WORKERS = 4
-MAX_RESOURCE_WORKERS = 6
-SITEMAP_WORKERS = 2
-REQUEST_TIMEOUT = 30
-SITEMAP_TIMEOUT = 45
+MAX_WORKERS = 3  # Reduced from 4 to avoid rate limiting
+MAX_RESOURCE_WORKERS = 4  # Reduced from 6
+SITEMAP_WORKERS = 1  # Reduced from 2 - process one sitemap at a time
+REQUEST_TIMEOUT = 45  # Increased timeout
+SITEMAP_TIMEOUT = 60  # Increased timeout
 MAX_TEXT_LENGTH = 100
 MAX_EMAIL_SIZE_MB = 15
-SESSION_POOL_SIZE = 20
+SESSION_POOL_SIZE = 15  # Reduced from 20
+MIN_REQUEST_DELAY = 0.5  # Minimum delay between requests (seconds)
+MAX_REQUEST_DELAY = 2.0  # Maximum delay between requests (seconds)
 
-# Enhanced User-Agent rotation
+# Enhanced User-Agent rotation - More realistic and recent
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 ]
+
+# Additional headers to appear more like a real browser
+BROWSER_HEADERS = {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'DNT': '1',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Cache-Control': 'max-age=0',
+    'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"'
+}
 
 # --- Global State ---
 
@@ -112,7 +132,8 @@ EMAIL_CONFIG = EmailConfig()
 SITES = [
     SiteConfig(
         name="BeautifulHomes",
-        sitemaps=["https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
+        sitemaps=[
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.store-locator-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.decor-products-sitemap.xml",
@@ -120,16 +141,16 @@ SITES = [
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.web-stories-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml",
-            
         ],
         output_dir='BeautifulHomes_broken_links_reports',
-        #recipients =["Bhuwan.pandey@deptagency.com"],
-       recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com '],
+        recipients=['bhwan.pandey@deptagency.com'],
+        #recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com'],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'
     ),
     SiteConfig(
         name="AsianPaints",
-        sitemaps=["https://www.asianpaints.com/sitemap-main-shop.xml",
+        sitemaps=[
+            "https://www.asianpaints.com/sitemap-main-shop.xml",
             "https://www.asianpaints.com/sitemap-main-services.xml",
             "https://www.asianpaints.com/sitemap-main-products.xml",
             "https://www.asianpaints.com/sitemap-main-blogs.xml",
@@ -146,11 +167,10 @@ SITES = [
             "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
             "https://www.asianpaints.com/sitemap-main-decorpro.xml",
             "https://www.asianpaints.com/sitemap-web-stories.xml",
-           
         ],
         output_dir='AsianPaints_broken_links_reports',
-        #recipients =["Bhuwan.pandey@deptagency.com"],
-       recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
+        recipients=['bhwan.pandey@deptagency.com'],
+        #recipients=['jhalak.mittal@asianpaints.com','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
         zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip'
     )
 ]
@@ -163,27 +183,19 @@ SITEMAP_STATUS_LOG = []
 # --- Session Management Functions ---
 
 def init_session_pool():
-    """Initialize session pool for connection reuse"""
+    """Initialize session pool for connection reuse with enhanced headers"""
     logger.info(f"Initializing session pool with {SESSION_POOL_SIZE} sessions...")
     for _ in range(SESSION_POOL_SIZE):
         session = requests.Session()
-        session.headers.update({
-            'User-Agent': random.choice(USER_AGENTS),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Cache-Control': 'max-age=0',
-        })
+        
+        # Use more realistic browser headers
+        headers = BROWSER_HEADERS.copy()
+        headers['User-Agent'] = random.choice(USER_AGENTS)
+        session.headers.update(headers)
         
         retry_strategy = Retry(
-            total=2,
-            backoff_factor=1,
+            total=3,  # Increased retries
+            backoff_factor=2,  # Longer backoff
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "OPTIONS"]
         )
@@ -237,25 +249,29 @@ def is_broken_status(status_code) -> bool:
     return status_code in BROKEN_STATUS_CODES
 
 def check_url_status(url: str, session: requests.Session, max_retries: int = 3) -> Union[int, str]:
-    """Check URL status with exponential backoff and HEAD/GET fallback"""
+    """Check URL status with exponential backoff and enhanced headers"""
     for attempt in range(max_retries):
         try:
             if attempt > 0:
-                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                # Longer delays on retries to avoid rate limiting
+                wait_time = (2 ** attempt) + random.uniform(0, 2)
                 logger.debug(f"Retry {attempt} for {url}, waiting {wait_time:.2f}s")
                 time.sleep(wait_time)
             
-            time.sleep(random.uniform(0.1, 0.3))
+            # Random delay between requests to appear more human-like
+            time.sleep(random.uniform(MIN_REQUEST_DELAY, MAX_REQUEST_DELAY))
             
-            response = session.head(url, timeout=(10, 20), allow_redirects=True)
+            # Rotate User-Agent for each request
+            session.headers['User-Agent'] = random.choice(USER_AGENTS)
+            
+            # Add Referer header to appear more legitimate
+            parsed = urlparse(url)
+            session.headers['Referer'] = f"{parsed.scheme}://{parsed.netloc}/"
+            
+            # Try GET request directly (some sites block HEAD requests)
+            response = session.get(url, timeout=(15, 30), allow_redirects=True, stream=True)
             status = response.status_code
             response.close()
-            
-            if status in [403, 405] or status >= 500:
-                time.sleep(random.uniform(0.2, 0.5))
-                response = session.get(url, timeout=(15, 30), allow_redirects=True, stream=True)
-                status = response.status_code
-                response.close()
             
             return status
             
@@ -263,11 +279,13 @@ def check_url_status(url: str, session: requests.Session, max_retries: int = 3) 
             if attempt == max_retries - 1:
                 logger.debug(f"Timeout for {url} after {max_retries} attempts")
                 return "Timeout/Error"
+            time.sleep(random.uniform(2, 4))  # Longer wait on timeout
             continue
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
                 logger.debug(f"Error for {url}: {str(e)}")
                 return "Error"
+            time.sleep(random.uniform(1, 3))
             continue
     
     return "Error"
@@ -348,6 +366,14 @@ def process_url(url: str) -> PageResult:
     """Process single URL: fetch, parse, check robots meta, and check links/images"""
     try:
         with get_session() as session:
+            # Rotate User-Agent and add Referer
+            session.headers['User-Agent'] = random.choice(USER_AGENTS)
+            parsed = urlparse(url)
+            session.headers['Referer'] = f"{parsed.scheme}://{parsed.netloc}/"
+            
+            # Add random delay to appear more human
+            time.sleep(random.uniform(MIN_REQUEST_DELAY, MAX_REQUEST_DELAY))
+            
             response = session.get(url, allow_redirects=True, timeout=REQUEST_TIMEOUT)
             response_code = response.status_code
             
@@ -415,6 +441,14 @@ def fetch_sitemap_urls(sitemap_url: str) -> tuple:
         with get_session() as session:
             logger.info(f"Fetching sitemap: {sitemap_url}")
             start_time = time.time()
+            
+            # Rotate User-Agent and add more headers for sitemap fetch
+            session.headers['User-Agent'] = random.choice(USER_AGENTS)
+            parsed = urlparse(sitemap_url)
+            session.headers['Referer'] = f"{parsed.scheme}://{parsed.netloc}/"
+            
+            # Add delay before sitemap fetch
+            time.sleep(random.uniform(0.5, 1.0))
             
             response = session.get(sitemap_url, timeout=SITEMAP_TIMEOUT)
             
