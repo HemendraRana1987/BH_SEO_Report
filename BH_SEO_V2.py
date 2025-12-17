@@ -70,7 +70,7 @@ class LinkResult:
 class PageResult:
     url: str
     response_code: Union[int, str]
-    robots_meta: str = ""  # NEW: Store robots meta tag value
+    robots_meta: str = ""
     broken_links: List[LinkResult] = field(default_factory=list)
     broken_images: List[LinkResult] = field(default_factory=list)
 
@@ -78,7 +78,8 @@ class PageResult:
 class SitemapStatus:
     url: str
     status: str
-    urls_found: int
+    status_code: Union[int, str] = ""  # NEW: Added status_code field
+    urls_found: int = 0
     error_message: str = ""
     timestamp: str = ""
     scan_time: float = 0.0
@@ -129,11 +130,9 @@ SITES = [
             "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
             "https://www.asianpaints.com/sitemap-main-decorpro.xml",
             "https://www.asianpaints.com/sitemap-web-stories.xml",
-           
         ],
         output_dir='AsianPaints_broken_links_reports',
-        recipients =["Bhuwan.pandey@deptagency.com"],
-       #recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
+        recipients=["Bhuwan.pandey@deptagency.com"],
         zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip'
     ),
     SiteConfig(
@@ -146,14 +145,11 @@ SITES = [
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.web-stories-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml",
-            
         ],
         output_dir='BeautifulHomes_broken_links_reports',
-        recipients =["Bhuwan.pandey@deptagency.com"],
-       #recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com '],
+        recipients=["Bhuwan.pandey@deptagency.com"],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'
     )
-    
 ]
 
 # Global session pool
@@ -362,9 +358,7 @@ def process_url(url: str) -> PageResult:
             except:
                 soup = BeautifulSoup(response.content, "html.parser")
             
-            # Extract robots meta tag
             robots_meta = extract_robots_meta(soup)
-            
             response.close()
             
             links_to_check = []
@@ -418,10 +412,16 @@ def fetch_sitemap_urls(sitemap_url: str) -> tuple:
             start_time = time.time()
             
             response = session.get(sitemap_url, timeout=SITEMAP_TIMEOUT)
+            status_code = response.status_code  # Capture the status code
+            status.status_code = status_code  # Store it in the status object
             
-            if response.status_code != 200:
-                status.error_message = f"HTTP {response.status_code}"
-                logger.error(f"✗ Sitemap returned status {response.status_code}: {sitemap_url}")
+            # Print status code immediately after fetching
+            print(f"📋 Sitemap Status Code: [{status_code}] - {sitemap_url}")
+            logger.info(f"Sitemap returned status code: {status_code}")
+            
+            if status_code != 200:
+                status.error_message = f"HTTP {status_code}"
+                logger.error(f"✗ Sitemap returned status {status_code}: {sitemap_url}")
                 SITEMAP_STATUS_LOG.append(status)
                 return ([], status)
             
@@ -461,11 +461,13 @@ def fetch_sitemap_urls(sitemap_url: str) -> tuple:
             return (updated_urls, status)
             
     except requests.exceptions.Timeout:
+        status.status_code = "Timeout"
         status.error_message = f"Timeout after {SITEMAP_TIMEOUT}s"
         logger.error(f"✗ Timeout fetching sitemap: {sitemap_url}")
         SITEMAP_STATUS_LOG.append(status)
         return ([], status)
     except Exception as e:
+        status.status_code = "Error"
         status.error_message = str(e)
         logger.error(f"✗ Error fetching sitemap {sitemap_url}: {str(e)}")
         SITEMAP_STATUS_LOG.append(status)
@@ -514,7 +516,6 @@ def calculate_stats(results: List[PageResult]) -> Dict:
     pages_with_broken_links = sum(1 for r in results if r.broken_links)
     pages_with_broken_images = sum(1 for r in results if r.broken_images)
     
-    # Count pages with noindex, nofollow
     noindex_nofollow_count = 0
     for r in results:
         if r.robots_meta:
@@ -605,32 +606,33 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
         logger.error(f"Error saving report: {str(e)}")
 
 def print_sitemap_status_table(site_name: str, sitemap_statuses: List[SitemapStatus]):
-    """Print a formatted table of sitemap statuses"""
-    print(f"\n{'='*100}")
+    """Print a formatted table of sitemap statuses with status codes"""
+    print(f"\n{'='*120}")
     print(f"SITEMAP STATUS REPORT - {site_name}")
-    print(f"{'='*100}")
-    print(f"{'#':<4} {'Status':<10} {'URLs':<8} {'Time(s)':<10} {'Sitemap URL':<50} {'Error':<20}")
-    print(f"{'-'*100}")
+    print(f"{'='*120}")
+    print(f"{'#':<4} {'Status':<10} {'Code':<8} {'URLs':<8} {'Time(s)':<10} {'Sitemap URL':<50} {'Error':<20}")
+    print(f"{'-'*120}")
     
     for idx, status in enumerate(sitemap_statuses, 1):
         status_symbol = "✓" if status.status == 'SUCCESS' else "✗" if status.status == 'FAILED' else "⚠"
         time_str = f"{status.scan_time:.2f}" if status.scan_time > 0 else "N/A"
         error_str = status.error_message[:18] + ".." if len(status.error_message) > 20 else status.error_message
+        code_str = str(status.status_code) if status.status_code else "N/A"
         
-        print(f"{idx:<4} {status_symbol} {status.status:<8} {status.urls_found:<8} {time_str:<10} "
+        print(f"{idx:<4} {status_symbol} {status.status:<8} {code_str:<8} {status.urls_found:<8} {time_str:<10} "
               f"{status.url[:48]:<50} {error_str:<20}")
     
-    print(f"{'-'*100}")
+    print(f"{'-'*120}")
     success_count = sum(1 for s in sitemap_statuses if s.status == 'SUCCESS')
     failed_count = sum(1 for s in sitemap_statuses if s.status == 'FAILED')
     empty_count = sum(1 for s in sitemap_statuses if s.status == 'EMPTY')
     
     print(f"SUMMARY: Total: {len(sitemap_statuses)} | "
           f"Success: {success_count} | Failed: {failed_count} | Empty: {empty_count}")
-    print(f"{'='*100}\n")
+    print(f"{'='*120}\n")
 
 def write_error_log(site_name: str, sitemap_statuses: List[SitemapStatus], output_dir: str = "."):
-    """Write error log to text file"""
+    """Write error log to text file with status codes"""
     failed_statuses = [s for s in sitemap_statuses if s.status in ['FAILED', 'EMPTY']]
     
     if not failed_statuses:
@@ -659,6 +661,7 @@ def write_error_log(site_name: str, sitemap_statuses: List[SitemapStatus], outpu
             for idx, status in enumerate(failed_statuses, 1):
                 f.write(f"[{idx}] {status.status} - {status.timestamp}\n")
                 f.write(f"    Sitemap URL: {status.url}\n")
+                f.write(f"    Status Code: {status.status_code}\n")
                 f.write(f"    Error Message: {status.error_message}\n")
                 f.write(f"    URLs Found: {status.urls_found}\n")
                 f.write(f"    Scan Time: {status.scan_time:.2f}s\n")
@@ -831,13 +834,15 @@ def process_sitemap_batch(sitemaps: List[str], output_dir: str, project_name: st
                 all_results.append(result_tuple)
                 site_sitemap_statuses.append(sitemap_status)
                 
-                success_status = f"✓ {sitemap_status.status}"
-                logger.info(f"[{completed}/{len(sitemaps)}] {success_status:<10}: {sitemap}")
+                status_code_str = f"[{sitemap_status.status_code}]" if sitemap_status.status_code else ""
+                success_status = f"✓ {sitemap_status.status} {status_code_str}"
+                logger.info(f"[{completed}/{len(sitemaps)}] {success_status:<20}: {sitemap}")
             except Exception as e:
                 logger.error(f"[{completed}/{len(sitemaps)}] ✗ FAILED    : {sitemap} - {str(e)}")
                 error_status = SitemapStatus(
                     url=sitemap,
                     status='FAILED',
+                    status_code='Error',
                     urls_found=0,
                     error_message=str(e),
                     timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -917,7 +922,6 @@ def process_all_sites(sites: List[SiteConfig], global_start_time: float) -> List
                 
         except Exception as e:
             logger.error(f"Error processing site {site.name}: {str(e)}")
-            # Add a placeholder result for failed site
             site_results.append((site, calculate_stats([]), {'total': len(site.sitemaps), 'success': 0, 'failed': len(site.sitemaps)}, None, 0.0))
     
     return site_results
@@ -955,7 +959,6 @@ def main():
                     
                     num_parts = math.ceil(zip_size_mb / MAX_EMAIL_SIZE_MB)
                     
-                    # Ensure original zip is deleted before creating splits to avoid confusion
                     if os.path.exists(site.zip_filename):
                         os.remove(site.zip_filename)
                         
@@ -968,7 +971,6 @@ def main():
                         subject = f"{site.name} Broken Links & Images Report - Part {idx}/{len(split_zips)}"
                         send_email(subject, body, site.recipients, zip_file)
                         
-                        # Remove the sent zip to prevent confusion/re-attachment
                         os.remove(zip_file)
                         
                         if idx < len(split_zips):
@@ -980,7 +982,6 @@ def main():
                     body = generate_email_body(site, stats, site_execution_time, site.zip_filename, sitemap_summary)
                     subject = f"{site.name} Broken Links & Images Report"
                     send_email(subject, body, site.recipients, site.zip_filename)
-                    # Remove the single sent zip
                     os.remove(site.zip_filename)
                 
                 # Cleanup directory
@@ -991,16 +992,15 @@ def main():
                 logger.error(f"Error in post-processing/email for {site.name}: {str(e)}")
 
     finally:
-        # Final cleanup regardless of success/failure
+        # Final cleanup
         cleanup_session_pool()
         
-        # Print final summary of all sitemaps
+        # Print final summary
         if SITEMAP_STATUS_LOG:
-            print("\n" + "="*100)
+            print("\n" + "="*120)
             print("FINAL SITEMAP STATUS SUMMARY - ALL SITES")
-            print("="*100)
+            print("="*120)
             
-            # Group statuses by site
             site_status_map = {}
             for site in SITES:
                 site_statuses = [s for s in SITEMAP_STATUS_LOG if any(sitemap in s.url for sitemap in site.sitemaps)]
