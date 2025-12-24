@@ -149,23 +149,7 @@ EMAIL_CONFIG = EmailConfig()
 SITES = [
     SiteConfig(
         name="AsianPaints",
-        sitemaps=["https://www.asianpaints.com/sitemap-main-shop.xml",
-            "https://www.asianpaints.com/sitemap-main-services.xml",
-            "https://www.asianpaints.com/sitemap-main-products.xml",
-            "https://www.asianpaints.com/sitemap-main-blogs.xml",
-            "https://www.asianpaints.com/sitemap-main-misc.xml",
-            "https://www.asianpaints.com/sitemap-main-more.xml",
-            "https://www.asianpaints.com/sitemap-main-aphomes.xml",
-            "https://www.asianpaints.com/sitemap-main-catalogue.xml",
-            "https://www.asianpaints.com/sitemap-main-painting-contractor.xml",
-            "https://www.asianpaints.com/sitemap-main-furnishing.xml",
-            "https://www.asianpaints.com/sitemap-main-wheretheheartis.xml",
-            "https://www.asianpaints.com/sitemap-main-safepaintingservices.xml",
-            "https://www.asianpaints.com/sitemap-main-store-locator.xml",
-            "https://www.asianpaints.com/sitemap-main-home-decor.xml",
-            "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
-            "https://www.asianpaints.com/sitemap-main-decorpro.xml",
-            "https://www.asianpaints.com/sitemap-web-stories.xml",
+        sitemaps=[
             # Add sitemap URLs here
         ],
         output_dir='AsianPaints_broken_links_reports',
@@ -174,7 +158,14 @@ SITES = [
     ),
     SiteConfig(
         name="BeautifulHomes",
-        sitemaps=["https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml"],
+        sitemaps=["https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.store-locator-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.decor-products-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.magazine-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.web-stories-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml"],
         output_dir='BeautifulHomes_broken_links_reports',
         recipients=["Bhuwan.pandey@deptagency.com"],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'
