@@ -233,10 +233,8 @@ INTER_SITE_DELAY = 15
 
 EMAIL_CONFIG = EmailConfig()
 
-# Asian Paints specific sitemap discovery
-ASIAN_PAINTS_SITEMAPS = [
-    # Try multiple possible sitemap locations
-    "https://www.asianpaints.com/sitemap-main-shop.xml",
+# Asian Paints specific siteBH_SEO_V6.pymap discovery
+ASIAN_PAINTS_SITEMAPS = ["https://www.asianpaints.com/sitemap-main-shop.xml",
             "https://www.asianpaints.com/sitemap-main-services.xml",
             "https://www.asianpaints.com/sitemap-main-products.xml",
             "https://www.asianpaints.com/sitemap-main-blogs.xml",
@@ -253,6 +251,8 @@ ASIAN_PAINTS_SITEMAPS = [
             "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
             "https://www.asianpaints.com/sitemap-main-decorpro.xml",
             "https://www.asianpaints.com/sitemap-web-stories.xml",
+    # Try multiple possible sitemap locations
+    
 ]
 
 SITES = [
@@ -281,7 +281,7 @@ SITES = [
     ),
     SiteConfig(
         name="BeautifulHomes",
-        sitemaps=["https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml"],
+        sitemaps=[""],
         output_dir='BeautifulHomes_broken_links_reports',
         recipients=["Bhuwan.pandey@deptagency.com"],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip',
