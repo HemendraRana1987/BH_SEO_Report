@@ -25,10 +25,6 @@ import math
 from queue import Queue
 import threading
 import json
-import hashlib
-import re
-import socket
-from functools import lru_cache
 
 # Suppress urllib3 warnings
 warnings.filterwarnings('ignore', category=Warning)
@@ -65,7 +61,6 @@ class SiteConfig:
     zip_filename: str
     use_slower_rate: bool = False
     extra_headers: Dict[str, str] = field(default_factory=dict)
-    verify_ssl: bool = True
 
 @dataclass
 class LinkResult:
@@ -106,135 +101,55 @@ class SitemapHistoricalData:
     noindex_nofollow_count: int
 
 @dataclass
-class URLCacheEntry:
-    """Cache entry for URL status"""
+class SiteHistoricalData:
+    """Store site-level historical data"""
+    site_name: str
+    scan_date: str
+    sitemap_data: List[SitemapHistoricalData]
     url: str
-    status_code: Union[int, str]
-    timestamp: float
-    check_count: int = 1
-
-class URLCache:
-    """Cache to store URL status and avoid duplicate checks"""
-    def __init__(self, max_size: int = 50000, ttl: int = 1800):  # 30 minutes TTL
-        self.cache: Dict[str, URLCacheEntry] = {}
-        self.max_size = max_size
-        self.ttl = ttl  # Time to live in seconds
-        self.lock = threading.Lock()
-        self.hits = 0
-        self.misses = 0
-    
-    def _get_key(self, url: str) -> str:
-        """Generate cache key for URL"""
-        try:
-            parsed = urlparse(url)
-            # Remove common tracking parameters
-            query_params = parse_qs(parsed.query)
-            filtered_params = {k: v for k, v in query_params.items() 
-                             if k.lower() not in ['utm_source', 'utm_medium', 'utm_campaign', 
-                                                'utm_term', 'utm_content', 'fbclid', 
-                                                'gclid', 'msclkid', 'ga_cid', '_ga']}
-            new_query = urlencode(filtered_params, doseq=True)
-            normalized_url = urlunparse((
-                parsed.scheme,
-                parsed.netloc.lower(),  # Lowercase domain
-                parsed.path.rstrip('/'),  # Remove trailing slash
-                parsed.params,
-                new_query,
-                parsed.fragment
-            ))
-            return normalized_url
-        except:
-            return url.lower()
-    
-    def get(self, url: str) -> Optional[Union[int, str]]:
-        """Get cached status for URL if valid"""
-        with self.lock:
-            key = self._get_key(url)
-            if key in self.cache:
-                entry = self.cache[key]
-                # Check if cache entry is still valid
-                if time.time() - entry.timestamp < self.ttl:
-                    self.hits += 1
-                    entry.check_count += 1
-                    return entry.status_code
-                else:
-                    # Entry expired, remove it
-                    del self.cache[key]
-            self.misses += 1
-            return None
-    
-    def set(self, url: str, status_code: Union[int, str]):
-        """Cache URL status"""
-        with self.lock:
-            key = self._get_key(url)
-            # Remove oldest entries if cache is full
-            if len(self.cache) >= self.max_size:
-                # Remove 10% of oldest entries
-                to_remove = sorted(self.cache.items(), 
-                                 key=lambda x: x[1].timestamp)[:self.max_size // 10]
-                for k, _ in to_remove:
-                    del self.cache[k]
-            
-            self.cache[key] = URLCacheEntry(
-                url=url,
-                status_code=status_code,
-                timestamp=time.time()
-            )
-    
-    def get_stats(self) -> Dict:
-        """Get cache statistics"""
-        with self.lock:
-            total = self.hits + self.misses
-            return {
-                'size': len(self.cache),
-                'hits': self.hits,
-                'misses': self.misses,
-                'hit_rate': self.hits / total if total > 0 else 0,
-                'avg_checks_per_url': sum(e.check_count for e in self.cache.values()) / len(self.cache) if self.cache else 0
-            }
-    
-    def clear(self):
-        """Clear the cache"""
-        with self.lock:
-            self.cache.clear()
-            self.hits = 0
-            self.misses = 0
+    status: str
+    status_code: Union[int, str] = ""
+    urls_found: int = 0
+    error_message: str = ""
+    timestamp: str = ""
+    scan_time: float = 0.0
 
 # --- Constants ---
 
-BROKEN_STATUS_CODES = {404, 400, 403, 500, 502, 503, 504, "Timeout/Error", "Error", "SSL Error"}
-SKIP_SCHEMES = ('javascript:', 'mailto:', 'tel:', '#', 'data:')
+BROKEN_STATUS_CODES = {404, 400, 403, 500, 502, 503, "Timeout/Error", "Error"}
+SKIP_SCHEMES = ('javascript:', 'mailto:', 'tel:', '#')
 MAX_WORKERS = 4
-MAX_RESOURCE_WORKERS = 8
+MAX_RESOURCE_WORKERS = 6
 SITEMAP_WORKERS = 2
 REQUEST_TIMEOUT = 30
-SITEMAP_TIMEOUT = 60  # Increased for Asian Paints
+SITEMAP_TIMEOUT = 45
 MAX_TEXT_LENGTH = 100
 MAX_EMAIL_SIZE_MB = 15
-SESSION_POOL_SIZE = 25
+SESSION_POOL_SIZE = 20
 HISTORY_DIR = 'scan_history'
 HISTORY_FILE = 'scan_history.json'
 
 # Enhanced User-Agent rotation
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
 ]
 
 # Add delay between requests to avoid rate limiting
-INTER_REQUEST_DELAY = 0.8
-INTER_SITE_DELAY = 15
+INTER_REQUEST_DELAY = 0.5
+INTER_SITE_DELAY = 10
 
 # --- Global State ---
 
 EMAIL_CONFIG = EmailConfig()
-
-# Asian Paints specific siteBH_SEO_V6.pymap discovery
-ASIAN_PAINTS_SITEMAPS = ["https://www.asianpaints.com/sitemap-main-shop.xml",
+SITES = [
+    SiteConfig(
+        name="AsianPaints",
+        sitemaps=["https://www.asianpaints.com/sitemap-main-shop.xml",
             "https://www.asianpaints.com/sitemap-main-services.xml",
             "https://www.asianpaints.com/sitemap-main-products.xml",
             "https://www.asianpaints.com/sitemap-main-blogs.xml",
@@ -251,42 +166,18 @@ ASIAN_PAINTS_SITEMAPS = ["https://www.asianpaints.com/sitemap-main-shop.xml",
             "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
             "https://www.asianpaints.com/sitemap-main-decorpro.xml",
             "https://www.asianpaints.com/sitemap-web-stories.xml",
-    # Try multiple possible sitemap locations
-    
-]
-
-SITES = [
-    SiteConfig(
-        name="AsianPaints",
-        sitemaps=ASIAN_PAINTS_SITEMAPS,
+            # Add sitemap URLs here
+        ],
         output_dir='AsianPaints_broken_links_reports',
         recipients=["Bhuwan.pandey@deptagency.com"],
-        zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip',
-        use_slower_rate=True,
-        verify_ssl=True,
-        extra_headers={
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0',
-            'TE': 'trailers',
-        }
+        zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip'
     ),
     SiteConfig(
         name="BeautifulHomes",
-        sitemaps=[""],
+        sitemaps=["https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml"],
         output_dir='BeautifulHomes_broken_links_reports',
         recipients=["Bhuwan.pandey@deptagency.com"],
-        zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip',
-        use_slower_rate=True,
-        verify_ssl=True
+        zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip'
     )
 ]
 
@@ -295,24 +186,17 @@ SESSION_POOL = Queue(maxsize=SESSION_POOL_SIZE)
 SESSION_LOCK = threading.Lock()
 SITEMAP_STATUS_LOG = []
 
-# Global URL cache
-URL_CACHE = URLCache(max_size=50000, ttl=1800)
-
 # --- Session Management Functions ---
 
 def init_session_pool():
     """Initialize session pool for connection reuse"""
     logger.info(f"Initializing session pool with {SESSION_POOL_SIZE} sessions...")
-    
     for _ in range(SESSION_POOL_SIZE):
         session = requests.Session()
         
-        # Rotate user agents
-        user_agent = random.choice(USER_AGENTS)
-        
         session.headers.update({
-            'User-Agent': user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'User-Agent': random.choice(USER_AGENTS),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
             'DNT': '1',
@@ -326,43 +210,33 @@ def init_session_pool():
             'Referer': 'https://www.google.com/',
         })
         
-        # More aggressive retry strategy for Asian Paints
         retry_strategy = Retry(
-            total=5,
-            backoff_factor=1.5,
-            status_forcelist=[408, 429, 500, 502, 503, 504, 522, 524],
-            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            raise_on_status=False
+            total=3,
+            backoff_factor=2,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS"]
         )
         
         adapter = HTTPAdapter(
-            pool_connections=100,
-            pool_maxsize=100,
+            pool_connections=50,
+            pool_maxsize=50,
             max_retries=retry_strategy,
             pool_block=False
         )
         session.mount('http://', adapter)
         session.mount('https://', adapter)
-        
         SESSION_POOL.put(session)
-    
     logger.info("Session pool initialized successfully")
     
-    # Log server information
     try:
+        import socket
         hostname = socket.gethostname()
         ip_address = socket.gethostbyname(hostname)
         logger.info(f"Server hostname: {hostname}")
         logger.info(f"Server IP: {ip_address}")
-        print(f"🖥️  Server Information:")
-        print(f"   Hostname: {hostname}")
-        print(f"   IP Address: {ip_address}")
-        
-        # Test connectivity
-        test_response = requests.get('https://www.google.com', timeout=5)
-        print(f"   Internet Connectivity: ✓ ({test_response.status_code})")
-    except Exception as e:
-        logger.warning(f"Could not determine server info: {str(e)}")
+        print(f"🖥️  Server IP: {ip_address}")
+    except:
+        logger.warning("Could not determine server IP")
 
 def cleanup_session_pool():
     """Close and clear all sessions in the pool."""
@@ -383,63 +257,6 @@ def get_session():
         yield session
     finally:
         SESSION_POOL.put(session)
-
-def test_sitemap_connectivity(sitemap_url: str) -> Dict:
-    """Test connectivity to sitemap with multiple methods"""
-    results = {
-        'url': sitemap_url,
-        'direct': {'status': 'Not tested', 'code': None, 'error': None},
-        'with_proxy': {'status': 'Not tested', 'code': None, 'error': None},
-        'with_browser_headers': {'status': 'Not tested', 'code': None, 'error': None}
-    }
-    
-    # Test 1: Direct connection
-    try:
-        response = requests.get(sitemap_url, timeout=10, verify=True)
-        results['direct'] = {
-            'status': 'Success' if response.status_code == 200 else 'Failed',
-            'code': response.status_code,
-            'error': None,
-            'headers': dict(response.headers),
-            'content_preview': response.text[:200] if response.text else ''
-        }
-        response.close()
-    except Exception as e:
-        results['direct'] = {
-            'status': 'Error',
-            'code': None,
-            'error': str(e),
-            'headers': {},
-            'content_preview': ''
-        }
-    
-    # Test 2: With browser headers
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/xml,text/xml,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-        }
-        response = requests.get(sitemap_url, headers=headers, timeout=10, verify=True)
-        results['with_browser_headers'] = {
-            'status': 'Success' if response.status_code == 200 else 'Failed',
-            'code': response.status_code,
-            'error': None,
-            'headers': dict(response.headers),
-            'content_preview': response.text[:200] if response.text else ''
-        }
-        response.close()
-    except Exception as e:
-        results['with_browser_headers'] = {
-            'status': 'Error',
-            'code': None,
-            'error': str(e),
-            'headers': {},
-            'content_preview': ''
-        }
-    
-    return results
 
 # --- History Tracking Functions ---
 
@@ -518,6 +335,36 @@ def get_previous_sitemap_data(sitemap_url: str, site_name: str) -> Tuple[Optiona
     
     return None, previous_date, previous_date
 
+def get_site_level_previous_data(site_name: str) -> Tuple[Optional[Dict], str]:
+    """Get aggregated previous scan data for entire site"""
+    history = load_scan_history()
+    
+    if site_name not in history or len(history[site_name]) == 0:
+        return None, ""
+    
+    previous_scan = history[site_name][-1]
+    previous_date = previous_scan['scan_date']
+    
+    # Aggregate data from all sitemaps in previous scan
+    aggregated_stats = {
+        'total_pages': 0,
+        'pages_with_broken_links': 0,
+        'pages_with_broken_images': 0,
+        'total_broken_links': 0,
+        'total_broken_images': 0,
+        'noindex_nofollow_count': 0
+    }
+    
+    for sitemap_data in previous_scan.get('sitemap_data', []):
+        aggregated_stats['total_pages'] += sitemap_data['total_pages']
+        aggregated_stats['pages_with_broken_links'] += sitemap_data['pages_with_broken_links']
+        aggregated_stats['pages_with_broken_images'] += sitemap_data['pages_with_broken_images']
+        aggregated_stats['total_broken_links'] += sitemap_data['total_broken_links']
+        aggregated_stats['total_broken_images'] += sitemap_data['total_broken_images']
+        aggregated_stats['noindex_nofollow_count'] += sitemap_data['noindex_nofollow_count']
+    
+    return aggregated_stats, previous_date
+
 # --- Utility Functions ---
 
 def extract_robots_meta(soup: BeautifulSoup) -> str:
@@ -533,19 +380,10 @@ def extract_robots_meta(soup: BeautifulSoup) -> str:
 
 def is_broken_status(status_code) -> bool:
     """Check if status code indicates a broken resource"""
-    if isinstance(status_code, str):
-        return status_code in BROKEN_STATUS_CODES
     return status_code in BROKEN_STATUS_CODES
 
-def check_url_status_cached(url: str, session: requests.Session, max_retries: int = 3) -> Union[int, str]:
-    """Check URL status with caching and enhanced error handling"""
-    # First check cache
-    cached_status = URL_CACHE.get(url)
-    if cached_status is not None:
-        logger.debug(f"Cache hit for URL: {url} -> {cached_status}")
-        return cached_status
-    
-    # Not in cache, perform actual check
+def check_url_status(url: str, session: requests.Session, max_retries: int = 3) -> Union[int, str]:
+    """Check URL status with exponential backoff and HEAD/GET fallback"""
     for attempt in range(max_retries):
         try:
             if attempt > 0:
@@ -553,59 +391,32 @@ def check_url_status_cached(url: str, session: requests.Session, max_retries: in
                 logger.debug(f"Retry {attempt} for {url}, waiting {wait_time:.2f}s")
                 time.sleep(wait_time)
             
-            # Small delay between requests
-            time.sleep(random.uniform(0.2, 0.5))
+            time.sleep(random.uniform(0.1, 0.3))
             
-            # Try HEAD first for speed
-            response = session.head(url, timeout=(10, 20), allow_redirects=True, verify=True)
+            response = session.head(url, timeout=(10, 20), allow_redirects=True)
             status = response.status_code
             response.close()
             
-            # If HEAD fails or returns certain status codes, try GET
-            if status in [403, 405, 408, 429] or status >= 500:
-                time.sleep(random.uniform(0.3, 0.7))
-                response = session.get(url, timeout=(15, 30), allow_redirects=True, stream=True, verify=True)
+            if status in [403, 405] or status >= 500:
+                time.sleep(random.uniform(0.2, 0.5))
+                response = session.get(url, timeout=(15, 30), allow_redirects=True, stream=True)
                 status = response.status_code
                 response.close()
             
-            # Cache the result
-            URL_CACHE.set(url, status)
             return status
             
-        except requests.exceptions.SSLError:
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectTimeout):
             if attempt == max_retries - 1:
-                error_status = "SSL Error"
-                URL_CACHE.set(url, error_status)
-                return error_status
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout):
-            if attempt == max_retries - 1:
-                error_status = "Timeout/Error"
-                URL_CACHE.set(url, error_status)
-                return error_status
-        except requests.exceptions.TooManyRedirects:
-            if attempt == max_retries - 1:
-                error_status = "Too Many Redirects"
-                URL_CACHE.set(url, error_status)
-                return error_status
-        except requests.exceptions.ConnectionError:
-            if attempt == max_retries - 1:
-                error_status = "Connection Error"
-                URL_CACHE.set(url, error_status)
-                return error_status
+                logger.debug(f"Timeout for {url} after {max_retries} attempts")
+                return "Timeout/Error"
+            continue
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
-                error_status = "Error"
-                URL_CACHE.set(url, error_status)
-                return error_status
-        except Exception as e:
-            if attempt == max_retries - 1:
-                error_status = "Error"
-                URL_CACHE.set(url, error_status)
-                return error_status
+                logger.debug(f"Error for {url}: {str(e)}")
+                return "Error"
+            continue
     
-    error_status = "Error"
-    URL_CACHE.set(url, error_status)
-    return error_status
+    return "Error"
 
 def normalize_url(base_url: str, href: str) -> Union[str, None]:
     """Normalize and validate URL"""
@@ -613,48 +424,16 @@ def normalize_url(base_url: str, href: str) -> Union[str, None]:
         return None
     
     try:
-        # Handle protocol-relative URLs
         if href.startswith('//'):
-            href = 'https:' + href
+            return 'https:' + href
         
-        # Parse the URL
         parsed = urlparse(href)
-        
-        # Handle relative URLs
         if not parsed.scheme:
-            # Check if it's an absolute path
-            if href.startswith('/'):
-                base_parsed = urlparse(base_url)
-                href = f"{base_parsed.scheme}://{base_parsed.netloc}{href}"
-            else:
-                href = urljoin(base_url, href)
-            
-            # Re-parse after joining
-            parsed = urlparse(href)
+            normalized = urljoin(base_url, href)
+            return normalized
         
-        # Ensure proper scheme
-        if not parsed.scheme:
-            return None
-        
-        # Clean up the URL
-        path = parsed.path
-        if path.endswith('/'):
-            path = path.rstrip('/')
-        
-        # Reconstruct URL
-        normalized = urlunparse((
-            parsed.scheme,
-            parsed.netloc.lower(),
-            path,
-            parsed.params,
-            parsed.query,
-            parsed.fragment
-        ))
-        
-        return normalized
-        
-    except Exception as e:
-        logger.debug(f"Error normalizing URL {href}: {str(e)}")
+        return href
+    except:
         return None
 
 def get_next_sibling_text(element, max_length: int = 200) -> str:
@@ -677,94 +456,45 @@ def get_next_sibling_text(element, max_length: int = 200) -> str:
         return f"Error: {str(e)}"
 
 def check_resource_batch(resources: List[tuple], session: requests.Session) -> List[LinkResult]:
-    """Check multiple resources in parallel with caching - only returns broken resources"""
+    """Check multiple resources in parallel - only returns broken resources"""
     results = []
     
-    # Separate cached and uncached resources
-    uncached_resources = []
-    cached_results = []
-    
-    for resource in resources:
-        url, text = resource[0], resource[1]
-        next_tag_data = resource[2] if len(resource) > 2 else ""
+    with ThreadPoolExecutor(max_workers=MAX_RESOURCE_WORKERS) as executor:
+        futures = {
+            executor.submit(check_url_status, resource[0], session): resource 
+            for resource in resources
+        }
         
-        # Check cache first
-        cached_status = URL_CACHE.get(url)
-        if cached_status is not None:
-            if is_broken_status(cached_status):
-                cached_results.append(LinkResult(
+        for future in as_completed(futures):
+            resource = futures[future]
+            url, text = resource[0], resource[1]
+            next_tag_data = resource[2] if len(resource) > 2 else ""
+            
+            try:
+                status = future.result()
+                if is_broken_status(status):
+                    results.append(LinkResult(
+                        url=url,
+                        status_code=status,
+                        text=text,
+                        next_tag_data=next_tag_data
+                    ))
+            except Exception as e:
+                logger.error(f"Error checking {url}: {str(e)}")
+                results.append(LinkResult(
                     url=url,
-                    status_code=cached_status,
+                    status_code="Error",
                     text=text,
                     next_tag_data=next_tag_data
                 ))
-        else:
-            uncached_resources.append(resource)
-    
-    # Add cached broken results
-    results.extend(cached_results)
-    
-    if not uncached_resources:
-        return results
-    
-    # Process uncached resources with limited concurrency
-    batch_size = 20
-    for i in range(0, len(uncached_resources), batch_size):
-        batch = uncached_resources[i:i+batch_size]
-        
-        with ThreadPoolExecutor(max_workers=min(MAX_RESOURCE_WORKERS, len(batch))) as executor:
-            futures = {
-                executor.submit(check_url_status_cached, resource[0], session): resource 
-                for resource in batch
-            }
-            
-            for future in as_completed(futures):
-                resource = futures[future]
-                url, text = resource[0], resource[1]
-                next_tag_data = resource[2] if len(resource) > 2 else ""
-                
-                try:
-                    status = future.result()
-                    if is_broken_status(status):
-                        results.append(LinkResult(
-                            url=url,
-                            status_code=status,
-                            text=text,
-                            next_tag_data=next_tag_data
-                        ))
-                except Exception as e:
-                    logger.error(f"Error checking {url}: {str(e)}")
-                    error_result = LinkResult(
-                        url=url,
-                        status_code="Error",
-                        text=text,
-                        next_tag_data=next_tag_data
-                    )
-                    results.append(error_result)
-                    URL_CACHE.set(url, "Error")
     
     return results
 
-def process_url(url: str, site_config: SiteConfig = None) -> PageResult:
+def process_url(url: str) -> PageResult:
     """Process single URL: fetch, parse, check robots meta, and check links/images"""
     try:
         with get_session() as session:
-            # Add site-specific headers
-            if site_config and site_config.extra_headers:
-                session.headers.update(site_config.extra_headers)
-            
-            # Add random delay for Asian Paints
-            if site_config and site_config.name == "AsianPaints":
-                time.sleep(random.uniform(1.0, 2.0))
-            
-            verify_ssl = site_config.verify_ssl if site_config else True
-            
-            response = session.get(
-                url, 
-                allow_redirects=True, 
-                timeout=REQUEST_TIMEOUT,
-                verify=verify_ssl
-            )
+            response = session.get(url, allow_redirects=True, timeout=REQUEST_TIMEOUT)
             response_code = response.status_code
             
             if response_code != 200:
@@ -801,15 +531,8 @@ def process_url(url: str, site_config: SiteConfig = None) -> PageResult:
                     next_tag_text = get_next_sibling_text(img)
                     images_to_check.append((img_url, alt_text, next_tag_text))
             
-            # Check resources in batches
-            broken_links = []
-            broken_images = []
-            
-            if links_to_check:
-                broken_links = check_resource_batch(links_to_check, session)
-            
-            if images_to_check:
-                broken_images = check_resource_batch(images_to_check, session)
+            broken_links = check_resource_batch(links_to_check, session) if links_to_check else []
+            broken_images = check_resource_batch(images_to_check, session) if images_to_check else []
             
             return PageResult(
                 url=url,
@@ -823,39 +546,8 @@ def process_url(url: str, site_config: SiteConfig = None) -> PageResult:
         logger.error(f"Error processing {url}: {str(e)}")
         return PageResult(url=url, response_code="Error", robots_meta="")
 
-# --- Enhanced Sitemap Functions ---
-
-def discover_sitemaps_from_robots(domain: str) -> List[str]:
-    """Discover sitemaps from robots.txt"""
-    sitemaps = []
-    robots_url = f"{domain.rstrip('/')}/robots.txt"
-    
-    try:
-        with get_session() as session:
-            # Special headers for robots.txt
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-                'Accept': 'text/plain',
-            }
-            
-            response = session.get(robots_url, headers=headers, timeout=10, verify=True)
-            
-            if response.status_code == 200:
-                for line in response.text.split('\n'):
-                    line = line.strip()
-                    if line.lower().startswith('sitemap:'):
-                        sitemap_url = line.split(':', 1)[1].strip()
-                        sitemaps.append(sitemap_url)
-                        logger.info(f"Found sitemap in robots.txt: {sitemap_url}")
-            
-            response.close()
-    except Exception as e:
-        logger.warning(f"Could not fetch robots.txt from {domain}: {str(e)}")
-    
-    return sitemaps
-
 def fetch_sitemap_urls(sitemap_url: str, site_config: SiteConfig = None) -> tuple:
-    """Enhanced sitemap fetching for Asian Paints"""
+    """Fetch URLs from sitemap, inject 'qaAutomation' parameter, and return status object"""
     status = SitemapStatus(
         url=sitemap_url,
         status='FAILED',
@@ -865,200 +557,56 @@ def fetch_sitemap_urls(sitemap_url: str, site_config: SiteConfig = None) -> tupl
     
     try:
         with get_session() as session:
-            # Enhanced headers for Asian Paints
-            enhanced_headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/xml,text/xml,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Cache-Control': 'max-age=0',
-            }
-            
-            if site_config and site_config.extra_headers:
-                enhanced_headers.update(site_config.extra_headers)
-            
-            session.headers.update(enhanced_headers)
-            
             logger.info(f"Fetching sitemap: {sitemap_url}")
-            print(f"🌐 Fetching: {sitemap_url}")
-            
             start_time = time.time()
             
-            # Try multiple times with delays
-            response = None
-            for attempt in range(3):
-                try:
-                    verify_ssl = site_config.verify_ssl if site_config else True
-                    response = session.get(
-                        sitemap_url, 
-                        timeout=SITEMAP_TIMEOUT, 
-                        verify=verify_ssl,
-                        allow_redirects=True
-                    )
-                    break
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                    if attempt == 2:
-                        raise
-                    logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
-                    time.sleep(3 * (attempt + 1))
-            
-            if not response:
-                status.error_message = "No response received"
-                SITEMAP_STATUS_LOG.append(status)
-                return ([], status)
-            
+            response = session.get(sitemap_url, timeout=SITEMAP_TIMEOUT)
             status_code = response.status_code
             status.status_code = status_code
             
-            print(f"📋 Status Code: [{status_code}] - {sitemap_url}")
+            print(f"📋 Sitemap Status Code: [{status_code}] - {sitemap_url}")
             logger.info(f"Sitemap returned status code: {status_code}")
             
             if status_code != 200:
-                # Log response details for debugging
-                logger.error(f"Non-200 response. Headers: {dict(response.headers)}")
-                if response.text:
-                    logger.error(f"Response preview (500 chars): {response.text[:500]}")
-                
                 status.error_message = f"HTTP {status_code}"
-                response.close()
+                logger.error(f"✗ Sitemap returned status {status_code}: {sitemap_url}")
                 SITEMAP_STATUS_LOG.append(status)
                 return ([], status)
             
-            # Parse response
-            content_type = response.headers.get('content-type', '').lower()
-            content = response.text
-            
-            logger.info(f"Content-Type: {content_type}")
-            logger.info(f"Content length: {len(content)} chars")
-            
-            # Try different parsing methods
-            urls = []
-            
-            # Method 1: Try as XML
-            if 'xml' in content_type or content.strip().startswith('<?xml'):
-                try:
-                    soup = BeautifulSoup(content, 'xml')
-                    # Look for URLs in various XML sitemap formats
-                    url_tags = soup.find_all(['loc', 'url'])
-                    for tag in url_tags:
-                        if tag.name == 'loc' and tag.text:
-                            urls.append(tag.text.strip())
-                        elif tag.name == 'url':
-                            loc_tag = tag.find('loc')
-                            if loc_tag and loc_tag.text:
-                                urls.append(loc_tag.text.strip())
-                    
-                    logger.info(f"XML parsing found {len(urls)} URLs")
-                except Exception as e:
-                    logger.warning(f"XML parsing failed: {str(e)}")
-            
-            # Method 2: Try regex patterns
-            if not urls:
-                try:
-                    # Common sitemap patterns
-                    patterns = [
-                        r'<loc>\s*(https?://[^<]+?)\s*</loc>',
-                        r'<url>\s*<loc>\s*(https?://[^<]+?)\s*</loc>',
-                        r'https?://[^<\s"\']+',  # Fallback for any URL
-                    ]
-                    
-                    for pattern in patterns:
-                        found_urls = re.findall(pattern, content, re.IGNORECASE)
-                        if found_urls:
-                            urls = list(set(found_urls))  # Remove duplicates
-                            logger.info(f"Regex pattern found {len(urls)} URLs")
-                            break
-                except Exception as e:
-                    logger.warning(f"Regex parsing failed: {str(e)}")
-            
-            # Method 3: Try line-by-line parsing
-            if not urls:
-                try:
-                    for line in content.split('\n'):
-                        line = line.strip()
-                        if 'http' in line.lower():
-                            # Extract URL from line
-                            url_match = re.search(r'(https?://[^\s<>"\']+)', line)
-                            if url_match:
-                                urls.append(url_match.group(0))
-                    logger.info(f"Line parsing found {len(urls)} URLs")
-                except Exception as e:
-                    logger.warning(f"Line parsing failed: {str(e)}")
-            
+            soup = BeautifulSoup(response.text, 'xml')
+            urls = [url.text for url in soup.find_all('loc')]
             response.close()
             
             if not urls:
-                # Save response for debugging
-                debug_filename = f"debug_sitemap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                with open(debug_filename, 'w', encoding='utf-8') as f:
-                    f.write(f"URL: {sitemap_url}\n")
-                    f.write(f"Status: {status_code}\n")
-                    f.write(f"Headers: {dict(response.headers)}\n")
-                    f.write(f"Content:\n{content[:5000]}\n")
-                
-                logger.error(f"No URLs found in sitemap. Debug saved to {debug_filename}")
-                print(f"⚠️  No URLs found. Debug file: {debug_filename}")
-                
                 status.status = 'EMPTY'
-                status.error_message = f"No URLs found - see {debug_filename}"
+                status.error_message = "No URLs found in sitemap"
+                logger.warning(f"⚠ Sitemap is empty: {sitemap_url}")
                 SITEMAP_STATUS_LOG.append(status)
                 return ([], status)
             
-            # Process and deduplicate URLs
-            unique_urls = []
-            seen_urls = set()
-            
+            updated_urls = []
             for url in urls:
-                try:
-                    # Clean and normalize URL
-                    url = url.strip()
-                    if not url:
-                        continue
-                    
-                    # Parse and reconstruct
-                    parsed = urlparse(url)
-                    if not parsed.scheme or not parsed.netloc:
-                        continue
-                    
-                    # Add qaAutomation parameter
-                    query_params = parse_qs(parsed.query)
-                    query_params["qaAutomation"] = ["true"]
-                    new_query = urlencode(query_params, doseq=True)
-                    
-                    normalized_url = urlunparse((
-                        parsed.scheme,
-                        parsed.netloc.lower(),
-                        parsed.path.rstrip('/'),
-                        parsed.params,
-                        new_query,
-                        parsed.fragment
-                    ))
-                    
-                    if normalized_url not in seen_urls:
-                        seen_urls.add(normalized_url)
-                        unique_urls.append(normalized_url)
-                        
-                except Exception as e:
-                    logger.warning(f"Error processing URL {url}: {str(e)}")
-                    if url not in seen_urls:
-                        seen_urls.add(url)
-                        unique_urls.append(url)
+                parsed = urlparse(url)
+                query_params = parse_qs(parsed.query)
+                query_params["qaAutomation"] = ["true"]
+                new_query = urlencode(query_params, doseq=True)
+                updated_url = urlunparse((
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path,
+                    parsed.params,
+                    new_query,
+                    parsed.fragment
+                ))
+                updated_urls.append(updated_url)
             
             status.status = 'SUCCESS'
-            status.urls_found = len(unique_urls)
+            status.urls_found = len(updated_urls)
             status.scan_time = time.time() - start_time
             
-            logger.info(f"✓ Successfully fetched {len(unique_urls)} unique URLs")
-            print(f"✅ Found {len(unique_urls)} URLs")
+            logger.info(f"✓ Fetched {len(updated_urls)} URLs from sitemap: {sitemap_url}")
             SITEMAP_STATUS_LOG.append(status)
-            return (unique_urls, status)
+            return (updated_urls, status)
             
     except requests.exceptions.Timeout:
         status.status_code = "Timeout"
@@ -1066,25 +614,16 @@ def fetch_sitemap_urls(sitemap_url: str, site_config: SiteConfig = None) -> tupl
         logger.error(f"✗ Timeout fetching sitemap: {sitemap_url}")
         SITEMAP_STATUS_LOG.append(status)
         return ([], status)
-    except requests.exceptions.SSLError as e:
-        status.status_code = "SSL Error"
-        status.error_message = f"SSL Error: {str(e)}"
-        logger.error(f"✗ SSL Error fetching sitemap: {sitemap_url}")
-        SITEMAP_STATUS_LOG.append(status)
-        return ([], status)
     except Exception as e:
         status.status_code = "Error"
         status.error_message = str(e)
         logger.error(f"✗ Error fetching sitemap {sitemap_url}: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
         SITEMAP_STATUS_LOG.append(status)
         return ([], status)
 
 def process_sitemap(sitemap_url: str, output_dir: str, project_name: str, site_config: SiteConfig = None) -> tuple:
     """Process sitemap with progress tracking and report saving"""
     logger.info(f"Processing sitemap: {sitemap_url}")
-    print(f"\n📊 Processing: {sitemap_url}")
     
     scan_start_time = time.time()
     scan_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1093,50 +632,27 @@ def process_sitemap(sitemap_url: str, output_dir: str, project_name: str, site_c
     
     if not urls:
         logger.warning(f"No URLs to process for sitemap: {sitemap_url}")
-        print(f"⚠️  No URLs found in sitemap")
         return ([], sitemap_url, project_name, scan_datetime, 0, False, sitemap_status)
     
     logger.info(f"Found {len(urls)} URLs to check")
-    print(f"🔍 Checking {len(urls)} URLs...")
     
     results = []
-    
-    # Process URLs in batches to manage memory
-    batch_size = 50
-    total_batches = (len(urls) + batch_size - 1) // batch_size
-    
-    for batch_num in range(total_batches):
-        batch_start = batch_num * batch_size
-        batch_end = min(batch_start + batch_size, len(urls))
-        batch_urls = urls[batch_start:batch_end]
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(process_url, url): url for url in urls}
         
-        print(f"   Batch {batch_num + 1}/{total_batches}: URLs {batch_start + 1}-{batch_end}")
-        
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = {executor.submit(process_url, url, site_config): url for url in batch_urls}
-            
-            for i, future in enumerate(as_completed(futures), 1):
-                try:
-                    result = future.result()
-                    results.append(result)
-                    
-                    progress = batch_start + i
-                    if progress % 10 == 0 or progress == len(urls):
-                        percent = (progress / len(urls)) * 100
-                        print(f"   Progress: {progress}/{len(urls)} ({percent:.1f}%)")
-                except Exception as e:
-                    logger.error(f"Error processing URL: {str(e)}")
-        
-        # Small delay between batches
-        if batch_num < total_batches - 1:
-            time.sleep(2)
+        for i, future in enumerate(as_completed(futures), 1):
+            try:
+                result = future.result()
+                results.append(result)
+                if i % 10 == 0 or i == len(urls):
+                    logger.info(f"Progress: {i}/{len(urls)} URLs processed ({(i/len(urls)*100):.1f}%)")
+            except Exception as e:
+                logger.error(f"Error processing URL: {str(e)}")
     
     scan_time = (time.time() - scan_start_time) / 60
     save_report(results, sitemap_url, output_dir, project_name, scan_datetime, scan_time)
     
     logger.info(f"✓ Completed sitemap in {scan_time:.2f} minutes")
-    print(f"✅ Completed in {scan_time:.2f} minutes")
-    
     return (results, sitemap_url, project_name, scan_datetime, scan_time, True, sitemap_status)
 
 # --- Reporting and Email Functions ---
@@ -1185,7 +701,7 @@ def create_comparison_sheet_data(current_stats: Dict, previous_data: Optional[Di
         'Metric': 'Total Pages Checked',
         'Current Value': current_total,
         'Previous Value': previous_total if previous_data else 'N/A',
-        'Change/Difference': f"{pages_change:+d}",
+        'Change/Difference': f"{pages_change} ({'+' if pages_change > 0 else ''}{pages_change})",
         'Trend': get_trend_emoji(pages_change)
     })
     
@@ -1197,8 +713,8 @@ def create_comparison_sheet_data(current_stats: Dict, previous_data: Optional[Di
         'Metric': 'Total Broken Links',
         'Current Value': current_links,
         'Previous Value': previous_links if previous_data else 'N/A',
-        'Change/Difference': f"{links_change:+d}",
-        'Trend': get_trend_emoji(links_change, reverse=True)
+        'Change/Difference': f"{links_change} ({'+' if links_change > 0 else ''}{links_change})",
+        'Trend': get_trend_emoji(links_change, reverse=True)  # Reverse because fewer is better
     })
     
     # Broken Images comparison
@@ -1209,7 +725,7 @@ def create_comparison_sheet_data(current_stats: Dict, previous_data: Optional[Di
         'Metric': 'Total Broken Images',
         'Current Value': current_images,
         'Previous Value': previous_images if previous_data else 'N/A',
-        'Change/Difference': f"{images_change:+d}",
+        'Change/Difference': f"{images_change} ({'+' if images_change > 0 else ''}{images_change})",
         'Trend': get_trend_emoji(images_change, reverse=True)
     })
     
@@ -1221,7 +737,7 @@ def create_comparison_sheet_data(current_stats: Dict, previous_data: Optional[Di
         'Metric': 'Pages with Broken Links',
         'Current Value': current_pages_links,
         'Previous Value': previous_pages_links if previous_data else 'N/A',
-        'Change/Difference': f"{pages_links_change:+d}",
+        'Change/Difference': f"{pages_links_change} ({'+' if pages_links_change > 0 else ''}{pages_links_change})",
         'Trend': get_trend_emoji(pages_links_change, reverse=True)
     })
     
@@ -1233,7 +749,7 @@ def create_comparison_sheet_data(current_stats: Dict, previous_data: Optional[Di
         'Metric': 'Pages with Broken Images',
         'Current Value': current_pages_images,
         'Previous Value': previous_pages_images if previous_data else 'N/A',
-        'Change/Difference': f"{pages_images_change:+d}",
+        'Change/Difference': f"{pages_images_change} ({'+' if pages_images_change > 0 else ''}{pages_images_change})",
         'Trend': get_trend_emoji(pages_images_change, reverse=True)
     })
     
@@ -1245,7 +761,7 @@ def create_comparison_sheet_data(current_stats: Dict, previous_data: Optional[Di
         'Metric': 'Pages with [noindex, nofollow]',
         'Current Value': current_noindex,
         'Previous Value': previous_noindex if previous_data else 'N/A',
-        'Change/Difference': f"{noindex_change:+d}",
+        'Change/Difference': f"{noindex_change} ({'+' if noindex_change > 0 else ''}{noindex_change})",
         'Trend': get_trend_emoji(noindex_change, reverse=True)
     })
     
@@ -1305,7 +821,6 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
                 project_name: str, scan_datetime: str, scan_time: float):
     """Save comprehensive Excel report with separate comparison sheet"""
     if not results:
-        logger.warning(f"No results to save for {sitemap_url}")
         return
     
     # Get current stats
@@ -1317,14 +832,8 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
     # Create comparison data
     comparison_data = create_comparison_sheet_data(current_stats, previous_data, scan_datetime, previous_date)
     
-    # Create safe filename
-    domain_name = urlparse(sitemap_url).netloc.replace('.', '_')
-    path_name = urlparse(sitemap_url).path.replace('/', '_').replace('.', '_')
-    if len(path_name) > 50:
-        path_name = path_name[:50]
-    
-    excel_filename = f"{domain_name}{path_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    excel_path = os.path.join(output_dir, excel_filename)
+    domain_name = urlparse(sitemap_url).netloc + urlparse(sitemap_url).path.replace("/", "_").replace(".", "-")
+    excel_path = os.path.join(output_dir, f'{domain_name}.xlsx')
     
     try:
         with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
@@ -1350,79 +859,71 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
             df_summary.to_excel(writer, sheet_name='Summary Report', index=False)
             
             # Comparison Sheet
-            if comparison_data:
-                df_comparison = pd.DataFrame(comparison_data)
-                df_comparison.to_excel(writer, sheet_name='Scan Comparison', index=False)
+            df_comparison = pd.DataFrame(comparison_data)
+            df_comparison.to_excel(writer, sheet_name='Scan Comparison', index=False)
             
             # Pages Overview
-            pages_data = []
-            for r in results:
-                pages_data.append({
+            pd.DataFrame([
+                {
                     "URL": r.url,
                     "Page Status Code": r.response_code,
                     "Robots Meta Tag": r.robots_meta if r.robots_meta else "Not Found",
                     "Broken Links Count": len(r.broken_links),
                     "Broken Images Count": len(r.broken_images)
-                })
-            
-            if pages_data:
-                pd.DataFrame(pages_data).to_excel(writer, sheet_name='Pages Overview', index=False)
+                }
+                for r in results
+            ]).to_excel(writer, sheet_name='Pages Overview', index=False)
             
             # Broken Links
-            broken_links = []
-            for r in results:
-                for link in r.broken_links:
-                    broken_links.append({
-                        "Page URL": r.url,
-                        "Link URL": link.url,
-                        "Status Code": link.status_code,
-                        "Link Text": link.text[:100]
-                    })
-            
+            broken_links = [
+                {
+                    "Page URL": r.url,
+                    "Link URL": link.url,
+                    "Status Code": link.status_code,
+                    "Link Text": link.text
+                }
+                for r in results for link in r.broken_links
+            ]
             if broken_links:
                 pd.DataFrame(broken_links).to_excel(writer, sheet_name='Broken Links', index=False)
             
             # Broken Images
-            broken_images = []
-            for r in results:
-                for img in r.broken_images:
-                    broken_images.append({
-                        "Page URL": r.url,
-                        "Image URL": img.url,
-                        "Status Code": img.status_code,
-                        "Alt Text": img.text[:100],
-                        "Next Tag Content": img.next_tag_data[:200] if img.next_tag_data else ""
-                    })
-            
+            broken_images = [
+                {
+                    "Page URL": r.url,
+                    "Image URL": img.url,
+                    "Status Code": img.status_code,
+                    "Alt Text": img.text,
+                    "Next Tag Content": img.next_tag_data if img.status_code == 404 else ""
+                }
+                for r in results for img in r.broken_images
+            ]
             if broken_images:
                 pd.DataFrame(broken_images).to_excel(writer, sheet_name='Broken Images', index=False)
             
-            # Format worksheets
+            # Format the comparison sheet
             workbook = writer.book
+            worksheet = writer.sheets['Scan Comparison']
             
-            # Auto-adjust column widths
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            cell_length = len(str(cell.value))
-                            if cell_length > max_length:
-                                max_length = cell_length
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            # Set column widths
+            for i, col in enumerate(df_comparison.columns):
+                column_width = max(df_comparison[col].astype(str).map(len).max(), len(col)) + 2
+                worksheet.column_dimensions[chr(65 + i)].width = min(column_width, 30)
+            
+            # Add header note
+            worksheet.cell(row=1, column=1, value=f"Scan Comparison Report - {project_name}")
+            worksheet.insert_rows(1)
+            worksheet.cell(row=1, column=1, value=f"Generated: {scan_datetime}")
+            worksheet.cell(row=2, column=1, value=f"Sitemap: {sitemap_url}")
+            
+            if previous_data:
+                worksheet.cell(row=3, column=1, value=f"Comparing: {previous_date} → {scan_datetime}")
+            else:
+                worksheet.cell(row=3, column=1, value="First Scan - No previous data for comparison")
         
-        logger.info(f"Report saved: {excel_path}")
-        print(f"📄 Report saved: {excel_filename}")
-        
+        logger.info(f"Report saved with separate comparison sheet: {excel_path}")
     except Exception as e:
         logger.error(f"Error saving report: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
 
 def print_sitemap_status_table(site_name: str, sitemap_statuses: List[SitemapStatus]):
     """Print a formatted table of sitemap statuses with status codes"""
@@ -1471,8 +972,7 @@ def write_error_log(site_name: str, sitemap_statuses: List[SitemapStatus], outpu
             
             f.write(f"Total Sitemaps Checked: {len(sitemap_statuses)}\n")
             f.write(f"Failed Sitemaps: {len(failed_statuses)}\n")
-            success_rate = ((len(sitemap_statuses)-len(failed_statuses))/len(sitemap_statuses)*100) if sitemap_statuses else 0
-            f.write(f"Success Rate: {success_rate:.1f}%\n\n")
+            f.write(f"Success Rate: {((len(sitemap_statuses)-len(failed_statuses))/len(sitemap_statuses)*100):.1f}%\n\n")
             
             f.write("="*100 + "\n")
             f.write("FAILED SITEMAP DETAILS\n")
@@ -1500,9 +1000,7 @@ def write_error_log(site_name: str, sitemap_statuses: List[SitemapStatus], outpu
 
 def get_file_size_mb(file_path: str) -> float:
     """Get file size in MB"""
-    if os.path.exists(file_path):
-        return os.path.getsize(file_path) / (1024 * 1024)
-    return 0
+    return os.path.getsize(file_path) / (1024 * 1024)
 
 def create_zip(output_dir: str, zip_path: str) -> float:
     """Create zip file and return size in MB"""
@@ -1510,10 +1008,9 @@ def create_zip(output_dir: str, zip_path: str) -> float:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, _, files in os.walk(output_dir):
                 for file in files:
-                    if file.endswith('.xlsx') or file.endswith('.txt'):
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, output_dir)
-                        zipf.write(file_path, arcname=arcname)
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, output_dir)
+                    zipf.write(file_path, arcname=arcname)
         
         size_mb = get_file_size_mb(zip_path)
         logger.info(f"Created zip: {zip_path} ({size_mb:.2f} MB)")
@@ -1525,9 +1022,6 @@ def create_zip(output_dir: str, zip_path: str) -> float:
 def split_files_into_groups(output_dir: str, num_groups: int) -> List[List[str]]:
     """Split Excel files into groups of roughly equal size"""
     excel_files = [f for f in os.listdir(output_dir) if f.endswith('.xlsx')]
-    
-    if not excel_files:
-        return []
     
     file_sizes = []
     for f in excel_files:
@@ -1550,11 +1044,8 @@ def split_files_into_groups(output_dir: str, num_groups: int) -> List[List[str]]
 def create_split_zips(output_dir: str, base_zip_name: str, num_parts: int) -> List[str]:
     """Create multiple ZIP files by splitting Excel reports"""
     file_groups = split_files_into_groups(output_dir, num_parts)
-    
-    if not file_groups:
-        return []
-    
     zip_files = []
+    
     base_name = base_zip_name.replace('.zip', '')
     
     for idx, file_group in enumerate(file_groups, 1):
@@ -1586,19 +1077,15 @@ def send_email(subject: str, body: str, recipients: List[str], attachment_path: 
     msg.attach(MIMEText(body, 'plain'))
     
     try:
+        with open(attachment_path, 'rb') as f:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(f.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{os.path.basename(attachment_path)}"')
+            msg.attach(part)
+        
         file_size = get_file_size_mb(attachment_path)
-        if file_size > 0:
-            with open(attachment_path, 'rb') as f:
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(f.read())
-                encoders.encode_base64(part)
-                part.add_header('Content-Disposition', f'attachment; filename="{os.path.basename(attachment_path)}"')
-                msg.attach(part)
-            
-            logger.info(f"Attachment: {os.path.basename(attachment_path)} ({file_size:.2f} MB)")
-        else:
-            logger.error(f"Attachment file not found or empty: {attachment_path}")
-            return
+        logger.info(f"Attachment: {os.path.basename(attachment_path)} ({file_size:.2f} MB)")
     except Exception as e:
         logger.error(f"Error attaching file: {str(e)}")
         return
@@ -1614,8 +1101,7 @@ def send_email(subject: str, body: str, recipients: List[str], attachment_path: 
 
 def generate_email_body(site: SiteConfig, stats: Dict, execution_time: float, 
                        zip_filename: str, sitemap_summary: Dict, part_info: str = "", 
-                       has_comparison: bool = False, is_first_scan: bool = False,
-                       cache_stats: Optional[Dict] = None) -> str:
+                       has_comparison: bool = False, is_first_scan: bool = False) -> str:
     """Generate email body with comparison info"""
     part_text = f"\n{part_info}\n" if part_info else ""
     
@@ -1626,11 +1112,6 @@ def generate_email_body(site: SiteConfig, stats: Dict, execution_time: float,
     else:
         comparison_text = ""
     
-    cache_info = ""
-    if cache_stats:
-        hit_rate_percent = cache_stats['hit_rate'] * 100
-        cache_info = f"\n🔍 CACHE STATISTICS:\n  - URLs checked from cache: {cache_stats['hits']:,}\n  - URLs checked from network: {cache_stats['misses']:,}\n  - Cache hit rate: {hit_rate_percent:.1f}%\n  - Total URLs cached: {cache_stats['size']:,}\n  - Average checks per URL: {cache_stats['avg_checks_per_url']:.1f}"
-    
     return f"""Greetings, {site.name} Team.
 
 Kindly review the outcomes of a recent Broken Links and Images check for the website.{part_text}
@@ -1639,11 +1120,11 @@ Report Summary:
 - Total XML Sitemaps Analyzed: {sitemap_summary['total']}
 - Successfully Processed Sitemaps: {sitemap_summary['success']}
 - Failed Sitemaps (Empty/Error): {sitemap_summary['failed']}
-- Total Pages Checked: {stats['total_pages']:,}
-- Total Broken Links Found: {stats['broken_links']:,}
-- Total Broken Images Found: {stats['broken_images']:,}
-- Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']:,}
-- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{cache_info}{comparison_text}
+- Total Pages Checked: {stats['total_pages']}
+- Total Broken Links Found: {stats['broken_links']}
+- Total Broken Images Found: {stats['broken_images']}
+- Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']}
+- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{comparison_text}
 
 The report is attached as '{zip_filename}'.
 
@@ -1668,7 +1149,6 @@ def process_sitemap_batch(sitemaps: List[str], output_dir: str, project_name: st
     site_sitemap_statuses = []
     
     logger.info(f"Processing {len(sitemaps)} sitemaps with {SITEMAP_WORKERS} workers")
-    print(f"\n🚀 Processing {len(sitemaps)} sitemaps...")
     
     with ThreadPoolExecutor(max_workers=SITEMAP_WORKERS) as executor:
         futures = {
@@ -1680,7 +1160,6 @@ def process_sitemap_batch(sitemaps: List[str], output_dir: str, project_name: st
         for future in as_completed(futures):
             sitemap = futures[future]
             completed += 1
-            
             try:
                 result_tuple = future.result()
                 results, sitemap_url, proj_name, scan_dt, scan_t, success, sitemap_status = result_tuple
@@ -1691,11 +1170,6 @@ def process_sitemap_batch(sitemaps: List[str], output_dir: str, project_name: st
                 status_code_str = f"[{sitemap_status.status_code}]" if sitemap_status.status_code else ""
                 success_status = f"✓ {sitemap_status.status} {status_code_str}"
                 logger.info(f"[{completed}/{len(sitemaps)}] {success_status:<20}: {sitemap}")
-                
-                # Print progress
-                print(f"[{completed}/{len(sitemaps)}] {sitemap_status.status}: {sitemap_url}")
-                print(f"   URLs: {sitemap_status.urls_found}, Time: {sitemap_status.scan_time:.1f}s")
-                
             except Exception as e:
                 logger.error(f"[{completed}/{len(sitemaps)}] ✗ FAILED    : {sitemap} - {str(e)}")
                 error_status = SitemapStatus(
@@ -1711,64 +1185,8 @@ def process_sitemap_batch(sitemaps: List[str], output_dir: str, project_name: st
     
     return all_results, site_sitemap_statuses
 
-def discover_sitemaps_for_site(site_config: SiteConfig) -> List[str]:
-    """Discover sitemaps for a site using multiple methods"""
-    discovered_sitemaps = []
-    
-    logger.info(f"\n🔍 Discovering sitemaps for {site_config.name}")
-    
-    # Start with configured sitemaps
-    discovered_sitemaps.extend(site_config.sitemaps)
-    
-    # Try to discover sitemaps from robots.txt
-    if site_config.sitemaps and len(site_config.sitemaps) > 0:
-        first_sitemap = site_config.sitemaps[0]
-        try:
-            parsed = urlparse(first_sitemap)
-            domain = f"{parsed.scheme}://{parsed.netloc}"
-            robots_sitemaps = discover_sitemaps_from_robots(domain)
-            discovered_sitemaps.extend(robots_sitemaps)
-        except:
-            pass
-    
-    # Remove duplicates while preserving order
-    unique_sitemaps = []
-    seen = set()
-    for sitemap in discovered_sitemaps:
-        if sitemap not in seen:
-            seen.add(sitemap)
-            unique_sitemaps.append(sitemap)
-    
-    logger.info(f"Discovered {len(unique_sitemaps)} unique sitemaps for {site_config.name}")
-    
-    return unique_sitemaps
-
-def test_sitemap_connectivity_for_site(site_config: SiteConfig):
-    """Test connectivity to all sitemaps for a site"""
-    print(f"\n🧪 Testing connectivity for {site_config.name}...")
-    
-    working_sitemaps = []
-    
-    for sitemap_url in site_config.sitemaps[:5]:  # Test first 5
-        print(f"\n  Testing: {sitemap_url}")
-        results = test_sitemap_connectivity(sitemap_url)
-        
-        if results['direct']['status'] == 'Success' or results['with_browser_headers']['status'] == 'Success':
-            working_sitemaps.append(sitemap_url)
-            print(f"    ✅ Accessible")
-        else:
-            print(f"    ❌ Not accessible")
-            print(f"    Direct: {results['direct']['error']}")
-            print(f"    With headers: {results['with_browser_headers']['error']}")
-    
-    return working_sitemaps
-
 def process_site(site: SiteConfig, global_start_time: float) -> tuple:
     """Process all sitemaps for a site"""
-    print(f"\n{'='*80}")
-    print(f"🌐 PROCESSING SITE: {site.name}")
-    print(f"{'='*80}")
-    
     os.makedirs(site.output_dir, exist_ok=True)
     
     logger.info(f"\n{'='*70}")
@@ -1779,16 +1197,6 @@ def process_site(site: SiteConfig, global_start_time: float) -> tuple:
         print(f"🐌 Slower crawling rate enabled for {site.name} to avoid blocking")
     logger.info(f"{'='*70}\n")
     
-    # Discover additional sitemaps
-    all_sitemaps = discover_sitemaps_for_site(site)
-    
-    if not all_sitemaps:
-        logger.error(f"No sitemaps found for {site.name}")
-        print(f"❌ No sitemaps found for {site.name}")
-        return (site, calculate_stats([]), {'total': 0, 'success': 0, 'failed': 0}, None, 0.0, True, URL_CACHE.get_stats())
-    
-    print(f"📋 Found {len(all_sitemaps)} sitemaps to check")
-    
     site_start_time = time.time()
     scan_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -1796,21 +1204,17 @@ def process_site(site: SiteConfig, global_start_time: float) -> tuple:
     history = load_scan_history()
     is_first_scan = site.name not in history or len(history[site.name]) == 0
     
-    # Process sitemaps
-    sitemap_results, site_sitemap_statuses = process_sitemap_batch(all_sitemaps, site.output_dir, site.name, site)
+    sitemap_results, site_sitemap_statuses = process_sitemap_batch(site.sitemaps, site.output_dir, site.name, site)
     site_execution_time = (time.time() - site_start_time) / 60
     
-    # Print status table
     print_sitemap_status_table(site.name, site_sitemap_statuses)
     
-    # Write error log if any failures
     error_log_path = write_error_log(site.name, site_sitemap_statuses, site.output_dir)
     
     # Save current scan to history
     save_current_scan(site.name, scan_date, sitemap_results, history)
     
-    # Calculate statistics
-    total_sitemaps = len(all_sitemaps)
+    total_sitemaps = len(site.sitemaps)
     successful_sitemaps = sum(1 for status in site_sitemap_statuses if status.status == 'SUCCESS')
     failed_sitemaps = total_sitemaps - successful_sitemaps
     
@@ -1827,73 +1231,46 @@ def process_site(site: SiteConfig, global_start_time: float) -> tuple:
     
     stats = calculate_stats(all_page_results)
     
-    # Get cache statistics
-    cache_stats = URL_CACHE.get_stats()
-    
     logger.info(f"\n{'='*70}")
     logger.info(f"Completed site: {site.name}")
     logger.info(f"Sitemaps: {successful_sitemaps}/{total_sitemaps} successful")
-    logger.info(f"Pages checked: {stats['total_pages']:,}")
-    logger.info(f"Broken links: {stats['broken_links']:,}")
-    logger.info(f"Broken images: {stats['broken_images']:,}")
-    logger.info(f"Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']:,}")
+    logger.info(f"Pages checked: {stats['total_pages']}")
+    logger.info(f"Broken links: {stats['broken_links']}")
+    logger.info(f"Broken images: {stats['broken_images']}")
+    logger.info(f"Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']}")
     logger.info(f"Site Execution Time: {site_execution_time:.2f} minutes")
-    logger.info(f"Cache Stats: {cache_stats['hits']:,} hits, {cache_stats['misses']:,} misses ({cache_stats['hit_rate']*100:.1f}% hit rate)")
     if error_log_path:
         logger.info(f"Error log: {error_log_path}")
     logger.info(f"{'='*70}\n")
     
-    print(f"\n📊 SITE SUMMARY - {site.name}")
-    print(f"   Sitemaps: {successful_sitemaps}/{total_sitemaps} successful")
-    print(f"   Pages checked: {stats['total_pages']:,}")
-    print(f"   Broken links: {stats['broken_links']:,}")
-    print(f"   Broken images: {stats['broken_images']:,}")
-    print(f"   Execution time: {site_execution_time:.2f} minutes")
-    print(f"   Cache hit rate: {cache_stats['hit_rate']*100:.1f}%")
-    print(f"{'='*80}\n")
-    
-    return (site, stats, sitemap_summary, error_log_path, site_execution_time, is_first_scan, cache_stats)
+    return (site, stats, sitemap_summary, error_log_path, site_execution_time, is_first_scan)
 
 def process_all_sites(sites: List[SiteConfig], global_start_time: float) -> List[tuple]:
     """Process all sites SEQUENTIALLY to avoid resource exhaustion"""
     site_results = []
     
     for idx, site in enumerate(sites, 1):
-        print(f"\n{'#'*80}")
-        print(f"# Processing Site {idx}/{len(sites)}: {site.name}")
-        print(f"{'#'*80}")
+        logger.info(f"\n{'#'*70}")
+        logger.info(f"# Processing Site {idx}/{len(sites)}: {site.name}")
+        logger.info(f"{'#'*70}")
         
         try:
-            # Test connectivity first
-            working_sitemaps = test_sitemap_connectivity_for_site(site)
-            
-            if not working_sitemaps and site.sitemaps:
-                print(f"⚠️  WARNING: No sitemaps accessible for {site.name}")
-                print(f"   Trying with enhanced methods...")
-            
             result = process_site(site, global_start_time)
             site_results.append(result)
             
-            # Clear cache between sites to free memory
-            URL_CACHE.clear()
-            
             if idx < len(sites):
-                logger.info(f"\nWaiting {INTER_SITE_DELAY} seconds before next site...")
-                print(f"\n⏳ Waiting {INTER_SITE_DELAY} seconds before next site...")
-                time.sleep(INTER_SITE_DELAY)
+                logger.info(f"\nWaiting 10 seconds before next site...")
+                time.sleep(10)
                 
         except Exception as e:
             logger.error(f"Error processing site {site.name}: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
             site_results.append((
                 site, 
                 calculate_stats([]), 
                 {'total': len(site.sitemaps), 'success': 0, 'failed': len(site.sitemaps)}, 
                 None, 
                 0.0, 
-                False,
-                URL_CACHE.get_stats()
+                False  # is_first_scan
             ))
     
     return site_results
@@ -1904,43 +1281,25 @@ def main():
     SITEMAP_STATUS_LOG = []
     start_time = time.time()
     
-    print("\n" + "="*80)
-    print("🚀 BROKEN LINKS & IMAGES CHECKER - ENHANCED FOR ASIAN PAINTS")
-    print("="*80)
-    print("Optimized with URL caching and enhanced sitemap discovery")
-    print("="*80)
+    logger.info("="*70)
+    logger.info("BROKEN LINKS & IMAGES CHECKER - SERVER OPTIMIZED")
+    logger.info("="*70)
     
-    # Initialize session pool
     init_session_pool()
     
     try:
-        print(f"\nStarting sequential processing of {len(SITES)} sites...")
         logger.info(f"\nStarting sequential processing of {len(SITES)} sites...")
-        
         site_results = process_all_sites(SITES, start_time)
         
-        print(f"\n{'='*80}")
-        print("📧 SENDING REPORTS VIA EMAIL")
-        print(f"{'='*80}")
-        
-        for site, stats, sitemap_summary, error_log_path, site_execution_time, is_first_scan, cache_stats in site_results:
-            print(f"\n📤 Processing email for: {site.name}")
+        for site, stats, sitemap_summary, error_log_path, site_execution_time, is_first_scan in site_results:
             logger.info(f"\n{'='*70}")
             logger.info(f"Post-processing {site.name}")
             logger.info(f"{'='*70}")
             
             try:
-                # Check if we have any reports
-                if not os.path.exists(site.output_dir) or not os.listdir(site.output_dir):
-                    print(f"   ⚠️  No reports generated for {site.name}")
-                    logger.warning(f"No reports generated for {site.name}")
-                    continue
-                
-                # Create zip file
                 zip_size_mb = create_zip(site.output_dir, site.zip_filename)
                 
                 if zip_size_mb > MAX_EMAIL_SIZE_MB:
-                    print(f"   📦 ZIP too large ({zip_size_mb:.2f} MB > {MAX_EMAIL_SIZE_MB} MB). Splitting...")
                     logger.warning(f"ZIP too large ({zip_size_mb:.2f} MB > {MAX_EMAIL_SIZE_MB} MB). Splitting...")
                     
                     num_parts = math.ceil(zip_size_mb / MAX_EMAIL_SIZE_MB)
@@ -1954,11 +1313,8 @@ def main():
                         part_info = f"📧 This is PART {idx} of {len(split_zips)}"
                         body = generate_email_body(site, stats, site_execution_time, 
                                                 os.path.basename(zip_file), sitemap_summary, part_info, 
-                                                has_comparison=True, is_first_scan=is_first_scan,
-                                                cache_stats=cache_stats)
+                                                has_comparison=True, is_first_scan=is_first_scan)
                         subject = f"{site.name} Broken Links & Images Report - Part {idx}/{len(split_zips)}"
-                        
-                        print(f"   📤 Sending part {idx}/{len(split_zips)}...")
                         send_email(subject, body, site.recipients, zip_file)
                         
                         os.remove(zip_file)
@@ -1966,64 +1322,28 @@ def main():
                         if idx < len(split_zips):
                             time.sleep(2)
                     
-                    print(f"   ✅ Sent {len(split_zips)} separate emails for {site.name}")
                     logger.info(f"Sent {len(split_zips)} separate emails for {site.name}")
                     
                 else:
                     body = generate_email_body(site, stats, site_execution_time, site.zip_filename, 
                                              sitemap_summary, has_comparison=True,
-                                             is_first_scan=is_first_scan, cache_stats=cache_stats)
+                                             is_first_scan=is_first_scan)
                     subject = f"{site.name} Broken Links & Images Report"
-                    
-                    print(f"   📤 Sending email...")
                     send_email(subject, body, site.recipients, site.zip_filename)
-                    
-                    if os.path.exists(site.zip_filename):
-                        os.remove(site.zip_filename)
-                    
-                    print(f"   ✅ Email sent for {site.name}")
+                    os.remove(site.zip_filename)
                 
-                # Clean up output directory
                 shutil.rmtree(site.output_dir, ignore_errors=True)
                 logger.info(f"Cleaned up directory: {site.output_dir}")
                 
             except Exception as e:
                 logger.error(f"Error in post-processing/email for {site.name}: {str(e)}")
-                import traceback
-                logger.error(traceback.format_exc())
-                print(f"   ❌ Error: {str(e)}")
 
-    except KeyboardInterrupt:
-        print("\n\n⏹️  Scan interrupted by user")
-        logger.warning("Scan interrupted by user")
-    except Exception as e:
-        logger.error(f"Unexpected error in main: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        print(f"\n❌ Unexpected error: {str(e)}")
     finally:
-        # Cleanup
         cleanup_session_pool()
         
-        # Print final cache statistics
-        final_cache_stats = URL_CACHE.get_stats()
-        print(f"\n{'='*80}")
-        print("📊 FINAL CACHE STATISTICS")
-        print(f"{'='*80}")
-        print(f"Total URLs cached: {final_cache_stats['size']:,}")
-        print(f"Cache hits: {final_cache_stats['hits']:,}")
-        print(f"Cache misses: {final_cache_stats['misses']:,}")
-        print(f"Cache hit rate: {final_cache_stats['hit_rate']*100:.1f}%")
-        print(f"Average checks per URL: {final_cache_stats['avg_checks_per_url']:.1f}")
-        print(f"{'='*80}")
-        
-        # Clear cache
-        URL_CACHE.clear()
-        
-        # Print final sitemap status summary
         if SITEMAP_STATUS_LOG:
             print("\n" + "="*120)
-            print("📋 FINAL SITEMAP STATUS SUMMARY - ALL SITES")
+            print("FINAL SITEMAP STATUS SUMMARY - ALL SITES")
             print("="*120)
             
             site_status_map = {}
@@ -2036,13 +1356,6 @@ def main():
                 print_sitemap_status_table(site_name, statuses)
 
         total_time = (time.time() - start_time) / 60
-        print(f"\n{'='*80}")
-        print("✅ PROCESS COMPLETED!")
-        print(f"{'='*80}")
-        print(f"Total overall execution time: {total_time:.2f} minutes")
-        print(f"Total sites processed: {len(SITES)}")
-        print(f"{'='*80}\n")
-        
         logger.info(f"\n{'='*70}")
         logger.info(f"PROCESS COMPLETED!")
         logger.info(f"Total overall execution time: {total_time:.2f} minutes")
