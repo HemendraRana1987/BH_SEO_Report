@@ -251,7 +251,8 @@ SITES = [
         name="AsianPaints",
         sitemaps=ASIAN_PAINTS_SITEMAPS,
         output_dir='AsianPaints_broken_links_reports',
-        recipients=["Bhuwan.pandey@deptagency.com"],
+       #recipients=["Bhuwan.pandey@deptagency.com"],
+        recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
         zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip',
         use_slower_rate=True,
         verify_ssl=True,
@@ -281,7 +282,7 @@ SITES = [
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml",],
         output_dir='BeautifulHomes_broken_links_reports',
-        recipients=["Bhuwan.pandey@deptagency.com"],
+        recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com ','authorbh2@asianpaints.com','authoring.BH1@asianpaints.com','authoring.BH@asianpaints.com'],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip',
         use_slower_rate=True,
         verify_ssl=True
