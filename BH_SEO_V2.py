@@ -35,9 +35,6 @@ warnings.filterwarnings('ignore', category=Warning)
 
 # --- Configuration and Setup ---
 
-# Get script directory for absolute paths
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -205,7 +202,7 @@ SITEMAP_TIMEOUT = 60
 MAX_TEXT_LENGTH = 100
 MAX_EMAIL_SIZE_MB = 15
 SESSION_POOL_SIZE = 25
-HISTORY_DIR = os.path.join(SCRIPT_DIR, 'scan_history')
+HISTORY_DIR = 'scan_history'
 HISTORY_FILE = 'scan_history.json'
 SITE_BREAK_MINUTES = 5 # 60-minute break between sites
 SITEMAP_BREAK_MINUTES = 5  # 5-minute break after each sitemap <- ADDED THIS
@@ -423,82 +420,40 @@ def test_sitemap_connectivity(sitemap_url: str) -> Dict:
 
 def load_scan_history() -> Dict:
     """Load scan history from JSON file"""
-    # Ensure history directory exists
-    os.makedirs(HISTORY_DIR, exist_ok=True)
-    
     history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
     
     if not os.path.exists(history_path):
-        logger.info(f"No existing history file found at {history_path}")
         return {}
     
     try:
         with open(history_path, 'r', encoding='utf-8') as f:
-            history = json.load(f)
-        logger.info(f"Loaded scan history from {history_path}")
-        return history
-    except json.JSONDecodeError:
-        logger.warning(f"History file corrupted at {history_path}, starting fresh")
-        return {}
+            return json.load(f)
     except Exception as e:
-        logger.error(f"Error loading scan history from {history_path}: {str(e)}")
+        logger.error(f"Error loading scan history: {str(e)}")
         return {}
 
 def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, history: Dict):
     """Save current scan results to history - keeps only last 2 scans"""
     try:
-        # Ensure history directory exists with absolute path
         os.makedirs(HISTORY_DIR, exist_ok=True)
-        
-        history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
         
         if site_name not in history:
             history[site_name] = []
         
         sitemap_data = []
-        total_results_added = 0
-        
-        logger.info(f"DEBUG: Saving scan for {site_name}")
-        logger.info(f"DEBUG: Total sitemap results to process: {len(sitemap_results)}")
-        
-        for idx, result in enumerate(sitemap_results):
-            # result is a tuple: (results, sitemap_url, project_name, scan_datetime, scan_time, success, sitemap_status)
-            if len(result) >= 7:
-                results, sitemap_url, proj_name, scan_dt, scan_t, success, sitemap_status = result
-                
-                # Debug info
-                logger.info(f"DEBUG: Sitemap {idx+1}: {sitemap_url}")
-                logger.info(f"DEBUG:   - Success flag: {success}")
-                logger.info(f"DEBUG:   - Sitemap status: {sitemap_status.status}")
-                logger.info(f"DEBUG:   - Results count: {len(results) if results else 0}")
-                
-                # Save data if sitemap was successful
-                if success or sitemap_status.status == 'SUCCESS':
-                    stats = calculate_stats(results) if results else {
-                        'total_pages': 0,
-                        'pages_with_broken_links': 0,
-                        'pages_with_broken_images': 0,
-                        'broken_links': 0,
-                        'broken_images': 0,
-                        'noindex_nofollow_count': 0
-                    }
-                    
-                    sitemap_data.append({
-                        'sitemap_url': sitemap_url,
-                        'scan_date': scan_date,
-                        'total_pages': stats['total_pages'],
-                        'pages_with_broken_links': stats['pages_with_broken_links'],
-                        'pages_with_broken_images': stats['pages_with_broken_images'],
-                        'total_broken_links': stats['broken_links'],
-                        'total_broken_images': stats['broken_images'],
-                        'noindex_nofollow_count': stats['noindex_nofollow_count']
-                    })
-                    total_results_added += 1
-                    logger.info(f"Added sitemap data for {sitemap_url}: {stats['total_pages']} pages")
-                else:
-                    logger.warning(f"Sitemap {sitemap_url} was not successful (success={success}, status={sitemap_status.status})")
-            else:
-                logger.error(f"Invalid result tuple structure: {result}")
+        for results, sitemap_url, _, _, _, success, sitemap_status in sitemap_results:
+            if success and results:
+                stats = calculate_stats(results)
+                sitemap_data.append({
+                    'sitemap_url': sitemap_url,
+                    'scan_date': scan_date,
+                    'total_pages': stats['total_pages'],
+                    'pages_with_broken_links': stats['pages_with_broken_links'],
+                    'pages_with_broken_images': stats['pages_with_broken_images'],
+                    'total_broken_links': stats['broken_links'],
+                    'total_broken_images': stats['broken_images'],
+                    'noindex_nofollow_count': stats['noindex_nofollow_count']
+                })
         
         site_scan = {
             'site_name': site_name,
@@ -511,23 +466,13 @@ def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, his
         if len(history[site_name]) > 2:
             history[site_name] = history[site_name][-2:]
         
-        # Save with absolute path
+        history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
         with open(history_path, 'w', encoding='utf-8') as f:
-            json.dump(history, f, indent=2, default=str)
+            json.dump(history, f, indent=2)
         
-        logger.info(f"✓ Saved scan history for {site_name} to {history_path}")
-        logger.info(f"  - Total sitemaps with data: {total_results_added}")
-        logger.info(f"  - Total history entries for site: {len(history[site_name])}")
-        
-        # Print summary for debugging
-        print(f"\n📊 HISTORY SAVED FOR {site_name}")
-        print(f"   Sitemaps with data: {total_results_added}")
-        print(f"   Total sitemap entries: {len(sitemap_data)}")
-        
+        logger.info(f"Saved scan history for {site_name} (keeping last 2 scans)")
     except Exception as e:
         logger.error(f"Error saving scan history: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
 
 def get_previous_sitemap_data(sitemap_url: str, site_name: str) -> Tuple[Optional[Dict], str, str]:
     """Get previous scan data for a specific sitemap"""
@@ -984,14 +929,13 @@ def fetch_sitemap_urls(sitemap_url: str, site_config: SiteConfig = None) -> tupl
             
             if not urls:
                 debug_filename = f"debug_sitemap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                debug_path = os.path.join(SCRIPT_DIR, debug_filename)
-                with open(debug_path, 'w', encoding='utf-8') as f:
+                with open(debug_filename, 'w', encoding='utf-8') as f:
                     f.write(f"URL: {sitemap_url}\n")
                     f.write(f"Status: {status_code}\n")
                     f.write(f"Headers: {dict(response.headers)}\n")
                     f.write(f"Content:\n{content[:5000]}\n")
                 
-                logger.error(f"No URLs found in sitemap. Debug saved to {debug_path}")
+                logger.error(f"No URLs found in sitemap. Debug saved to {debug_filename}")
                 print(f"⚠️  No URLs found. Debug file: {debug_filename}")
                 
                 status.status = 'EMPTY'
@@ -1584,10 +1528,10 @@ def generate_email_body(site: SiteConfig, stats: Dict, execution_time: float,
     else:
         comparison_text = ""
     
-    cache_info = ""
+    '''cache_info = ""
     if cache_stats:
         hit_rate_percent = cache_stats['hit_rate'] * 100
-        cache_info = f"\n🔍 CACHE STATISTICS:\n  - URLs checked from cache: {cache_stats['hits']:,}\n  - URLs checked from network: {cache_stats['misses']:,}\n  - Cache hit rate: {hit_rate_percent:.1f}%\n  - Total URLs cached: {cache_stats['size']:,}\n  - Average checks per URL: {cache_stats['avg_checks_per_url']:.1f}"
+        cache_info = f"\n🔍 CACHE STATISTICS:\n  - URLs checked from cache: {cache_stats['hits']:,}\n  - URLs checked from network: {cache_stats['misses']:,}\n  - Cache hit rate: {hit_rate_percent:.1f}%\n  - Total URLs cached: {cache_stats['size']:,}\n  - Average checks per URL: {cache_stats['avg_checks_per_url']:.1f}" '''
     
     return f"""Greetings, {site.name} Team.
 
@@ -1601,7 +1545,7 @@ Report Summary:
 - Total Broken Links Found: {stats['broken_links']:,}
 - Total Broken Images Found: {stats['broken_images']:,}
 - Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']:,}
-- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{comparison_text}{cache_info}
+- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{comparison_text}
 
 The report is attached as '{zip_filename}'.
 
@@ -1716,14 +1660,6 @@ def process_sitemap_batch(sitemaps: List[str], output_dir: str, project_name: st
                 all_results.append(result_tuple)
                 site_sitemap_statuses.append(sitemap_status)
                 
-                # Add debug logging
-                if success and results:
-                    logger.info(f"Sitemap {sitemap_url} processed successfully with {len(results)} results")
-                elif success and not results:
-                    logger.warning(f"Sitemap {sitemap_url} marked as success but has no results")
-                else:
-                    logger.error(f"Sitemap {sitemap_url} failed to process")
-                
                 status_code_str = f"[{sitemap_status.status_code}]" if sitemap_status.status_code else ""
                 success_status = f"✓ {sitemap_status.status} {status_code_str}"
                 logger.info(f"[{completed}/{len(sitemaps)}] {success_status:<20}: {sitemap}")
@@ -1767,10 +1703,6 @@ def process_sitemap_batch(sitemaps: List[str], output_dir: str, project_name: st
                         time.sleep(min(60, remaining))
                     
                     print(f"✅ Break completed. Starting next sitemap now...\n")
-    
-    logger.info(f"Processed all {len(sitemaps)} sitemaps")
-    logger.info(f"Total successful sitemaps: {sum(1 for s in site_sitemap_statuses if s.status == 'SUCCESS')}")
-    logger.info(f"Total results collected: {len(all_results)}")
     
     return all_results, site_sitemap_statuses
 
@@ -1866,23 +1798,12 @@ def process_site(site: SiteConfig, global_start_time: float) -> tuple:
     history = load_scan_history()
     is_first_scan = site.name not in history or len(history[site.name]) == 0
     
-    logger.info(f"Starting to process {len(all_sitemaps)} sitemaps for {site.name}")
-    
     sitemap_results, site_sitemap_statuses = process_sitemap_batch(all_sitemaps, site.output_dir, site.name, site)
     site_execution_time = (time.time() - site_start_time) / 60
     
     print_sitemap_status_table(site.name, site_sitemap_statuses)
     
     write_error_log(site.name, site_sitemap_statuses, site.output_dir)
-    
-    # Debug: Check what we're about to save
-    logger.info(f"DEBUG: About to save history for {site.name}")
-    logger.info(f"DEBUG: Total sitemap results: {len(sitemap_results)}")
-    
-    for idx, result in enumerate(sitemap_results):
-        if len(result) >= 7:
-            results, sitemap_url, proj_name, scan_dt, scan_t, success, sitemap_status = result
-            logger.info(f"DEBUG: Result {idx}: {sitemap_url}, success={success}, results_count={len(results) if results else 0}")
     
     save_current_scan(site.name, scan_date, sitemap_results, history)
     
@@ -1898,7 +1819,7 @@ def process_site(site: SiteConfig, global_start_time: float) -> tuple:
     
     all_page_results = []
     for results, _, _, _, _, _, sitemap_status in sitemap_results:
-        if sitemap_status.status == 'SUCCESS' and results:
+        if sitemap_status.status == 'SUCCESS':
             all_page_results.extend(results)
     
     stats = calculate_stats(all_page_results)
@@ -1980,25 +1901,10 @@ def main():
     print("\n" + "="*80)
     print("🚀 BROKEN LINKS & IMAGES CHECKER - ENHANCED FOR ASIAN PAINTS")
     print("="*80)
-    print(f"Script location: {SCRIPT_DIR}")
-    print(f"History location: {HISTORY_DIR}")
     print("Sequential processing with immediate email sending")
     print(f"60-minute breaks between sites")
     print(f"5-minute breaks after each sitemap")
     print("="*80)
-    
-    # Ensure history directory exists and is writable
-    try:
-        os.makedirs(HISTORY_DIR, exist_ok=True)
-        test_file = os.path.join(HISTORY_DIR, 'test.txt')
-        with open(test_file, 'w') as f:
-            f.write('test')
-        os.remove(test_file)
-        print(f"✅ History directory is writable: {HISTORY_DIR}")
-    except Exception as e:
-        print(f"❌ Cannot write to history directory: {HISTORY_DIR}")
-        print(f"   Error: {str(e)}")
-        return
     
     init_session_pool()
     
