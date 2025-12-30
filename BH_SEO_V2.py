@@ -204,7 +204,7 @@ MAX_EMAIL_SIZE_MB = 15
 SESSION_POOL_SIZE = 25
 HISTORY_DIR = 'scan_history'
 HISTORY_FILE = 'scan_history.json'
-SITE_BREAK_MINUTES = 60  # 60-minute break between sites
+SITE_BREAK_MINUTES = 5 # 60-minute break between sites
 SITEMAP_BREAK_MINUTES = 5  # 5-minute break after each sitemap <- ADDED THIS
 
 # Enhanced User-Agent rotation
@@ -227,23 +227,10 @@ EMAIL_CONFIG = EmailConfig()
 
 # Asian Paints specific sitemaps
 ASIAN_PAINTS_SITEMAPS = [
-    "https://www.asianpaints.com/sitemap-main-shop.xml",
-    "https://www.asianpaints.com/sitemap-main-services.xml",
-    "https://www.asianpaints.com/sitemap-main-products.xml",
-    "https://www.asianpaints.com/sitemap-main-blogs.xml",
+    
     "https://www.asianpaints.com/sitemap-main-misc.xml",
     "https://www.asianpaints.com/sitemap-main-more.xml",
-    "https://www.asianpaints.com/sitemap-main-aphomes.xml",
-    "https://www.asianpaints.com/sitemap-main-catalogue.xml",
-    "https://www.asianpaints.com/sitemap-main-painting-contractor.xml",
-    "https://www.asianpaints.com/sitemap-main-furnishing.xml",
-    "https://www.asianpaints.com/sitemap-main-wheretheheartis.xml",
-    "https://www.asianpaints.com/sitemap-main-safepaintingservices.xml",
-    "https://www.asianpaints.com/sitemap-main-store-locator.xml",
-    "https://www.asianpaints.com/sitemap-main-home-decor.xml",
-    "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
-    "https://www.asianpaints.com/sitemap-main-decorpro.xml",
-    "https://www.asianpaints.com/sitemap-web-stories.xml"
+    
 ]
 
 SITES = [
@@ -251,8 +238,8 @@ SITES = [
         name="AsianPaints",
         sitemaps=ASIAN_PAINTS_SITEMAPS,
         output_dir='AsianPaints_broken_links_reports',
-       #recipients=["Bhuwan.pandey@deptagency.com"],
-        recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
+       recipients=["Bhuwan.pandey@deptagency.com"],
+       #recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
         zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip',
         use_slower_rate=True,
         verify_ssl=True,
@@ -273,16 +260,12 @@ SITES = [
     ),
     SiteConfig(
         name="BeautifulHomes",
-        sitemaps=["https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
-            "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml",
+        sitemaps=[
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.store-locator-sitemap.xml",
-            "https://www.beautifulhomes.asianpaints.com/en.sitemap.decor-products-sitemap.xml",
-            "https://www.beautifulhomes.asianpaints.com/en.sitemap.magazine-sitemap.xml",
-            "https://www.beautifulhomes.asianpaints.com/en.sitemap.web-stories-sitemap.xml",
-            "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
-            "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml",],
+            ],
         output_dir='BeautifulHomes_broken_links_reports',
-        recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com ','authorbh2@asianpaints.com','authoring.BH1@asianpaints.com','authoring.BH@asianpaints.com'],
+        recipients=["Bhuwan.pandey@deptagency.com"],
+        #recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com ','authorbh2@asianpaints.com','authoring.BH1@asianpaints.com','authoring.BH@asianpaints.com'],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip',
         use_slower_rate=True,
         verify_ssl=True
