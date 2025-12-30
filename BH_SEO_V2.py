@@ -458,14 +458,30 @@ def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, his
         sitemap_data = []
         total_results_added = 0
         
-        for result in sitemap_results:
+        logger.info(f"DEBUG: Saving scan for {site_name}")
+        logger.info(f"DEBUG: Total sitemap results to process: {len(sitemap_results)}")
+        
+        for idx, result in enumerate(sitemap_results):
             # result is a tuple: (results, sitemap_url, project_name, scan_datetime, scan_time, success, sitemap_status)
             if len(result) >= 7:
                 results, sitemap_url, proj_name, scan_dt, scan_t, success, sitemap_status = result
                 
-                # Check if sitemap was successful AND has results
-                if success and results and len(results) > 0:
-                    stats = calculate_stats(results)
+                # Debug info
+                logger.info(f"DEBUG: Sitemap {idx+1}: {sitemap_url}")
+                logger.info(f"DEBUG:   - Success flag: {success}")
+                logger.info(f"DEBUG:   - Sitemap status: {sitemap_status.status}")
+                logger.info(f"DEBUG:   - Results count: {len(results) if results else 0}")
+                
+                # Save data if sitemap was successful
+                if success or sitemap_status.status == 'SUCCESS':
+                    stats = calculate_stats(results) if results else {
+                        'total_pages': 0,
+                        'pages_with_broken_links': 0,
+                        'pages_with_broken_images': 0,
+                        'broken_links': 0,
+                        'broken_images': 0,
+                        'noindex_nofollow_count': 0
+                    }
                     
                     sitemap_data.append({
                         'sitemap_url': sitemap_url,
@@ -480,10 +496,7 @@ def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, his
                     total_results_added += 1
                     logger.info(f"Added sitemap data for {sitemap_url}: {stats['total_pages']} pages")
                 else:
-                    if success and not results:
-                        logger.warning(f"Sitemap {sitemap_url} was successful but has no results")
-                    elif not success:
-                        logger.warning(f"Sitemap {sitemap_url} was not successful")
+                    logger.warning(f"Sitemap {sitemap_url} was not successful (success={success}, status={sitemap_status.status})")
             else:
                 logger.error(f"Invalid result tuple structure: {result}")
         
