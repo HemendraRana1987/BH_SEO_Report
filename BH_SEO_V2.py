@@ -35,6 +35,9 @@ warnings.filterwarnings('ignore', category=Warning)
 
 # --- Configuration and Setup ---
 
+# Get script directory for absolute paths
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -202,7 +205,7 @@ SITEMAP_TIMEOUT = 60
 MAX_TEXT_LENGTH = 100
 MAX_EMAIL_SIZE_MB = 15
 SESSION_POOL_SIZE = 25
-HISTORY_DIR = 'scan_history'
+HISTORY_DIR = os.path.join(SCRIPT_DIR, 'scan_history')
 HISTORY_FILE = 'scan_history.json'
 SITE_BREAK_MINUTES = 5 # 60-minute break between sites
 SITEMAP_BREAK_MINUTES = 5  # 5-minute break after each sitemap <- ADDED THIS
@@ -420,22 +423,34 @@ def test_sitemap_connectivity(sitemap_url: str) -> Dict:
 
 def load_scan_history() -> Dict:
     """Load scan history from JSON file"""
+    # Ensure history directory exists
+    os.makedirs(HISTORY_DIR, exist_ok=True)
+    
     history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
     
     if not os.path.exists(history_path):
+        logger.info(f"No existing history file found at {history_path}")
         return {}
     
     try:
         with open(history_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            history = json.load(f)
+        logger.info(f"Loaded scan history from {history_path}")
+        return history
+    except json.JSONDecodeError:
+        logger.warning(f"History file corrupted at {history_path}, starting fresh")
+        return {}
     except Exception as e:
-        logger.error(f"Error loading scan history: {str(e)}")
+        logger.error(f"Error loading scan history from {history_path}: {str(e)}")
         return {}
 
 def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, history: Dict):
     """Save current scan results to history - keeps only last 2 scans"""
     try:
+        # Ensure history directory exists with absolute path
         os.makedirs(HISTORY_DIR, exist_ok=True)
+        
+        history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
         
         if site_name not in history:
             history[site_name] = []
@@ -466,13 +481,15 @@ def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, his
         if len(history[site_name]) > 2:
             history[site_name] = history[site_name][-2:]
         
-        history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
+        # Save with absolute path
         with open(history_path, 'w', encoding='utf-8') as f:
-            json.dump(history, f, indent=2)
+            json.dump(history, f, indent=2, default=str)
         
-        logger.info(f"Saved scan history for {site_name} (keeping last 2 scans)")
+        logger.info(f"Saved scan history for {site_name} to {history_path} (keeping last 2 scans)")
     except Exception as e:
         logger.error(f"Error saving scan history: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 def get_previous_sitemap_data(sitemap_url: str, site_name: str) -> Tuple[Optional[Dict], str, str]:
     """Get previous scan data for a specific sitemap"""
@@ -929,13 +946,14 @@ def fetch_sitemap_urls(sitemap_url: str, site_config: SiteConfig = None) -> tupl
             
             if not urls:
                 debug_filename = f"debug_sitemap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                with open(debug_filename, 'w', encoding='utf-8') as f:
+                debug_path = os.path.join(SCRIPT_DIR, debug_filename)
+                with open(debug_path, 'w', encoding='utf-8') as f:
                     f.write(f"URL: {sitemap_url}\n")
                     f.write(f"Status: {status_code}\n")
                     f.write(f"Headers: {dict(response.headers)}\n")
                     f.write(f"Content:\n{content[:5000]}\n")
                 
-                logger.error(f"No URLs found in sitemap. Debug saved to {debug_filename}")
+                logger.error(f"No URLs found in sitemap. Debug saved to {debug_path}")
                 print(f"⚠️  No URLs found. Debug file: {debug_filename}")
                 
                 status.status = 'EMPTY'
@@ -1528,10 +1546,10 @@ def generate_email_body(site: SiteConfig, stats: Dict, execution_time: float,
     else:
         comparison_text = ""
     
-    '''cache_info = ""
+    cache_info = ""
     if cache_stats:
         hit_rate_percent = cache_stats['hit_rate'] * 100
-        cache_info = f"\n🔍 CACHE STATISTICS:\n  - URLs checked from cache: {cache_stats['hits']:,}\n  - URLs checked from network: {cache_stats['misses']:,}\n  - Cache hit rate: {hit_rate_percent:.1f}%\n  - Total URLs cached: {cache_stats['size']:,}\n  - Average checks per URL: {cache_stats['avg_checks_per_url']:.1f}" '''
+        cache_info = f"\n🔍 CACHE STATISTICS:\n  - URLs checked from cache: {cache_stats['hits']:,}\n  - URLs checked from network: {cache_stats['misses']:,}\n  - Cache hit rate: {hit_rate_percent:.1f}%\n  - Total URLs cached: {cache_stats['size']:,}\n  - Average checks per URL: {cache_stats['avg_checks_per_url']:.1f}"
     
     return f"""Greetings, {site.name} Team.
 
@@ -1545,7 +1563,7 @@ Report Summary:
 - Total Broken Links Found: {stats['broken_links']:,}
 - Total Broken Images Found: {stats['broken_images']:,}
 - Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']:,}
-- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{comparison_text}
+- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{comparison_text}{cache_info}
 
 The report is attached as '{zip_filename}'.
 
@@ -1901,10 +1919,25 @@ def main():
     print("\n" + "="*80)
     print("🚀 BROKEN LINKS & IMAGES CHECKER - ENHANCED FOR ASIAN PAINTS")
     print("="*80)
+    print(f"Script location: {SCRIPT_DIR}")
+    print(f"History location: {HISTORY_DIR}")
     print("Sequential processing with immediate email sending")
     print(f"60-minute breaks between sites")
     print(f"5-minute breaks after each sitemap")
     print("="*80)
+    
+    # Ensure history directory exists and is writable
+    try:
+        os.makedirs(HISTORY_DIR, exist_ok=True)
+        test_file = os.path.join(HISTORY_DIR, 'test.txt')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        print(f"✅ History directory is writable: {HISTORY_DIR}")
+    except Exception as e:
+        print(f"❌ Cannot write to history directory: {HISTORY_DIR}")
+        print(f"   Error: {str(e)}")
+        return
     
     init_session_pool()
     
