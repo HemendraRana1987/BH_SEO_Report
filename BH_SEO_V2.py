@@ -427,7 +427,16 @@ def load_scan_history() -> Dict:
     
     try:
         with open(history_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            history_data = json.load(f)
+            # Ensure it's a dictionary
+            if isinstance(history_data, dict):
+                return history_data
+            else:
+                logger.warning(f"History file is not a dictionary, returning empty dict")
+                return {}
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing scan history JSON: {str(e)}")
+        return {}
     except Exception as e:
         logger.error(f"Error loading scan history: {str(e)}")
         return {}
@@ -461,29 +470,37 @@ def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, his
             'sitemap_data': sitemap_data
         }
         
+        # Append new scan to the list
         history[site_name].append(site_scan)
         
+        # Keep only the last 2 scans (not reassign)
         if len(history[site_name]) > 2:
+            # Keep the 2 most recent scans
             history[site_name] = history[site_name][-2:]
         
         history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
         with open(history_path, 'w', encoding='utf-8') as f:
-            json.dump(history, f, indent=2)
+            json.dump(history, f, indent=2, default=str)
         
-        logger.info(f"Saved scan history for {site_name} (keeping last 2 scans)")
+        logger.info(f"Saved scan history for {site_name} (keeping last {len(history[site_name])} scans)")
     except Exception as e:
         logger.error(f"Error saving scan history: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 def get_previous_sitemap_data(sitemap_url: str, site_name: str) -> Tuple[Optional[Dict], str, str]:
     """Get previous scan data for a specific sitemap"""
     history = load_scan_history()
     
-    if site_name not in history or len(history[site_name]) == 0:
+    if site_name not in history or len(history[site_name]) < 2:
+        # Need at least 2 scans for comparison
         return None, "", ""
     
-    previous_scan = history[site_name][-1]
+    # Get the previous scan (second from last)
+    previous_scan = history[site_name][-2]  # Changed from [-1] to [-2]
     previous_date = previous_scan['scan_date']
     
+    # Find the sitemap data in the previous scan
     for sitemap_data in previous_scan.get('sitemap_data', []):
         if sitemap_data['sitemap_url'] == sitemap_url:
             return sitemap_data, previous_date, previous_date
@@ -804,7 +821,7 @@ def fetch_sitemap_urls(sitemap_url: str, site_config: SiteConfig = None) -> tupl
         url=sitemap_url,
         status='FAILED',
         urls_found=0,
-        timestamp=datetime.now().strftime("%Y-%m-d %H:%M:%S")
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     )
     
     try:
@@ -1528,10 +1545,10 @@ def generate_email_body(site: SiteConfig, stats: Dict, execution_time: float,
     else:
         comparison_text = ""
     
-    '''cache_info = ""
+    cache_info = ""
     if cache_stats:
         hit_rate_percent = cache_stats['hit_rate'] * 100
-        cache_info = f"\n🔍 CACHE STATISTICS:\n  - URLs checked from cache: {cache_stats['hits']:,}\n  - URLs checked from network: {cache_stats['misses']:,}\n  - Cache hit rate: {hit_rate_percent:.1f}%\n  - Total URLs cached: {cache_stats['size']:,}\n  - Average checks per URL: {cache_stats['avg_checks_per_url']:.1f}" '''
+        cache_info = f"\n🔍 CACHE STATISTICS:\n  - URLs checked from cache: {cache_stats['hits']:,}\n  - URLs checked from network: {cache_stats['misses']:,}\n  - Cache hit rate: {hit_rate_percent:.1f}%\n  - Total URLs cached: {cache_stats['size']:,}\n  - Average checks per URL: {cache_stats['avg_checks_per_url']:.1f}"
     
     return f"""Greetings, {site.name} Team.
 
@@ -1545,7 +1562,7 @@ Report Summary:
 - Total Broken Links Found: {stats['broken_links']:,}
 - Total Broken Images Found: {stats['broken_images']:,}
 - Pages with [noindex, nofollow]: {stats['noindex_nofollow_count']:,}
-- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{comparison_text}
+- Total Scan Execution Time (all sitemaps for site): {execution_time:.2f} minutes{comparison_text}{cache_info}
 
 The report is attached as '{zip_filename}'.
 
