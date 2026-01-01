@@ -204,8 +204,8 @@ MAX_EMAIL_SIZE_MB = 15
 SESSION_POOL_SIZE = 25
 HISTORY_DIR = 'scan_history'
 HISTORY_FILE = 'scan_history.json'
-SITE_BREAK_MINUTES = 5 # 60-minute break between sites
-SITEMAP_BREAK_MINUTES = 5  # 5-minute break after each sitemap <- ADDED THIS
+SITE_BREAK_MINUTES = 60 # 60-minute break between sites
+SITEMAP_BREAK_MINUTES = 5  # 5-minute break after each sitemap
 
 # Enhanced User-Agent rotation
 USER_AGENTS = [
@@ -227,10 +227,23 @@ EMAIL_CONFIG = EmailConfig()
 
 # Asian Paints specific sitemaps
 ASIAN_PAINTS_SITEMAPS = [
-    
+    "https://www.asianpaints.com/sitemap-main-shop.xml",
+    "https://www.asianpaints.com/sitemap-main-services.xml",
+    "https://www.asianpaints.com/sitemap-main-products.xml",
+    "https://www.asianpaints.com/sitemap-main-blogs.xml",
     "https://www.asianpaints.com/sitemap-main-misc.xml",
     "https://www.asianpaints.com/sitemap-main-more.xml",
-    
+    "https://www.asianpaints.com/sitemap-main-aphomes.xml",
+    "https://www.asianpaints.com/sitemap-main-catalogue.xml",
+    "https://www.asianpaints.com/sitemap-main-painting-contractor.xml",
+    "https://www.asianpaints.com/sitemap-main-furnishing.xml",
+    "https://www.asianpaints.com/sitemap-main-wheretheheartis.xml",
+    "https://www.asianpaints.com/sitemap-main-safepaintingservices.xml",
+    "https://www.asianpaints.com/sitemap-main-store-locator.xml",
+    "https://www.asianpaints.com/sitemap-main-home-decor.xml",
+    "https://www.asianpaints.com/sitemap-main-colour-inspiration-zone.xml",
+    "https://www.asianpaints.com/sitemap-main-decorpro.xml",
+    "https://www.asianpaints.com/sitemap-web-stories.xml"
 ]
 
 SITES = [
@@ -238,8 +251,8 @@ SITES = [
         name="AsianPaints",
         sitemaps=ASIAN_PAINTS_SITEMAPS,
         output_dir='AsianPaints_broken_links_reports',
-       recipients=["Bhuwan.pandey@deptagency.com"],
-       #recipients=['jhalak.mittal@asianpaints.com ','gaurang.kapadia@deptagency.com','silpamohapatra@kpmg.com','vasiurrahmangh@kpmg.com','arjun.kulkarni@asianpaints.com','ankita.singh@asianpaints.com'],
+        #recipients=["Bhuwan.pandey@deptagency.com"],
+        recipients=['jhalak.mittal@asianpaints.com ', 'gaurang.kapadia@deptagency.com', 'silpamohapatra@kpmg.com', 'vasiurrahmangh@kpmg.com', 'arjun.kulkarni@asianpaints.com', 'ankita.singh@asianpaints.com'],
         zip_filename='ASIAN_PAINTS_Broken_Image_Link.zip',
         use_slower_rate=True,
         verify_ssl=True,
@@ -261,11 +274,18 @@ SITES = [
     SiteConfig(
         name="BeautifulHomes",
         sitemaps=[
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.blogs-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-designs-sitemap.xml",
             "https://www.beautifulhomes.asianpaints.com/en.sitemap.store-locator-sitemap.xml",
-            ],
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.decor-products-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.magazine-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.web-stories-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.interior-design-ideas-sitemap.xml",
+            "https://www.beautifulhomes.asianpaints.com/en.sitemap.xml"
+        ],
         output_dir='BeautifulHomes_broken_links_reports',
-        recipients=["Bhuwan.pandey@deptagency.com"],
-        #recipients=['arjun.kulkarni@asianpaints.com','khushali.shukla@deptagency.com','gaurang.kapadia@deptagency.com','ankita.singh@asianpaints.com','abhishek.sarma@asianpaints.com ','authorbh2@asianpaints.com','authoring.BH1@asianpaints.com','authoring.BH@asianpaints.com'],
+        #recipients=["Bhuwan.pandey@deptagency.com"],
+        recipients=['arjun.kulkarni@asianpaints.com', 'khushali.shukla@deptagency.com', 'gaurang.kapadia@deptagency.com', 'ankita.singh@asianpaints.com', 'abhishek.sarma@asianpaints.com ', 'authorbh2@asianpaints.com', 'authoring.BH1@asianpaints.com', 'authoring.BH@asianpaints.com'],
         zip_filename='BEAUTIFULHOMES_Broken_Image_Link.zip',
         use_slower_rate=True,
         verify_ssl=True
@@ -427,16 +447,7 @@ def load_scan_history() -> Dict:
     
     try:
         with open(history_path, 'r', encoding='utf-8') as f:
-            history_data = json.load(f)
-            # Ensure it's a dictionary
-            if isinstance(history_data, dict):
-                return history_data
-            else:
-                logger.warning(f"History file is not a dictionary, returning empty dict")
-                return {}
-    except json.JSONDecodeError as e:
-        logger.error(f"Error parsing scan history JSON: {str(e)}")
-        return {}
+            return json.load(f)
     except Exception as e:
         logger.error(f"Error loading scan history: {str(e)}")
         return {}
@@ -451,18 +462,26 @@ def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, his
         
         sitemap_data = []
         for results, sitemap_url, _, _, _, success, sitemap_status in sitemap_results:
-            if success and results:
-                stats = calculate_stats(results)
-                sitemap_data.append({
-                    'sitemap_url': sitemap_url,
-                    'scan_date': scan_date,
-                    'total_pages': stats['total_pages'],
-                    'pages_with_broken_links': stats['pages_with_broken_links'],
-                    'pages_with_broken_images': stats['pages_with_broken_images'],
-                    'total_broken_links': stats['broken_links'],
-                    'total_broken_images': stats['broken_images'],
-                    'noindex_nofollow_count': stats['noindex_nofollow_count']
-                })
+            # Always include sitemap in history, even if empty
+            stats = calculate_stats(results) if results else {
+                'total_pages': 0,
+                'pages_with_broken_links': 0,
+                'pages_with_broken_images': 0,
+                'total_broken_links': 0,
+                'total_broken_images': 0,
+                'noindex_nofollow_count': 0
+            }
+            
+            sitemap_data.append({
+                'sitemap_url': sitemap_url,
+                'scan_date': scan_date,
+                'total_pages': stats['total_pages'],
+                'pages_with_broken_links': stats['pages_with_broken_links'],
+                'pages_with_broken_images': stats['pages_with_broken_images'],
+                'total_broken_links': stats['broken_links'],
+                'total_broken_images': stats['broken_images'],
+                'noindex_nofollow_count': stats['noindex_nofollow_count']
+            })
         
         site_scan = {
             'site_name': site_name,
@@ -470,37 +489,29 @@ def save_current_scan(site_name: str, scan_date: str, sitemap_results: List, his
             'sitemap_data': sitemap_data
         }
         
-        # Append new scan to the list
         history[site_name].append(site_scan)
         
-        # Keep only the last 2 scans (not reassign)
         if len(history[site_name]) > 2:
-            # Keep the 2 most recent scans
             history[site_name] = history[site_name][-2:]
         
         history_path = os.path.join(HISTORY_DIR, HISTORY_FILE)
         with open(history_path, 'w', encoding='utf-8') as f:
-            json.dump(history, f, indent=2, default=str)
+            json.dump(history, f, indent=2)
         
-        logger.info(f"Saved scan history for {site_name} (keeping last {len(history[site_name])} scans)")
+        logger.info(f"Saved scan history for {site_name} (keeping last 2 scans)")
     except Exception as e:
         logger.error(f"Error saving scan history: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
 
 def get_previous_sitemap_data(sitemap_url: str, site_name: str) -> Tuple[Optional[Dict], str, str]:
     """Get previous scan data for a specific sitemap"""
     history = load_scan_history()
     
-    if site_name not in history or len(history[site_name]) < 2:
-        # Need at least 2 scans for comparison
+    if site_name not in history or len(history[site_name]) == 0:
         return None, "", ""
     
-    # Get the previous scan (second from last)
-    previous_scan = history[site_name][-2]  # Changed from [-1] to [-2]
+    previous_scan = history[site_name][-1]
     previous_date = previous_scan['scan_date']
     
-    # Find the sitemap data in the previous scan
     for sitemap_data in previous_scan.get('sitemap_data', []):
         if sitemap_data['sitemap_url'] == sitemap_url:
             return sitemap_data, previous_date, previous_date
@@ -821,7 +832,7 @@ def fetch_sitemap_urls(sitemap_url: str, site_config: SiteConfig = None) -> tupl
         url=sitemap_url,
         status='FAILED',
         urls_found=0,
-        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp=datetime.now().strftime("%Y-%m-d %H:%M:%S")
     )
     
     try:
@@ -1034,7 +1045,13 @@ def process_sitemap(sitemap_url: str, output_dir: str, project_name: str, site_c
     if not urls:
         logger.warning(f"No URLs to process for sitemap: {sitemap_url}")
         print(f"⚠️  No URLs found in sitemap")
-        return ([], sitemap_url, project_name, scan_datetime, 0, False, sitemap_status)
+        
+        # FIX: Save an empty report to update history even when no URLs found
+        empty_results = []
+        scan_time = (time.time() - scan_start_time) / 60
+        save_report(empty_results, sitemap_url, output_dir, project_name, scan_datetime, scan_time)
+        
+        return (empty_results, sitemap_url, project_name, scan_datetime, scan_time, True, sitemap_status)
     
     logger.info(f"Found {len(urls)} URLs to check")
     print(f"🔍 Checking {len(urls)} URLs...")
@@ -1234,10 +1251,6 @@ def calculate_time_difference(current_date: str, previous_date: str) -> str:
 def save_report(results: List[PageResult], sitemap_url: str, output_dir: str, 
                 project_name: str, scan_datetime: str, scan_time: float):
     """Save comprehensive Excel report with separate comparison sheet"""
-    if not results:
-        logger.warning(f"No results to save for {sitemap_url}")
-        return
-    
     current_stats = calculate_stats(results)
     
     previous_data, previous_date, previous_time = get_previous_sitemap_data(sitemap_url, project_name)
@@ -1260,14 +1273,15 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
                     "Pages with Broken Links", "Pages with Broken Images",
                     "Total Broken Links (4xx, 5xx errors)", "Total Broken Images (4xx, 5xx errors)",
                     "Pages with [noindex, nofollow]",
-                    "Total Time for Scan (minutes)"
+                    "Total Time for Scan (minutes)", "Sitemap Status"
                 ],
                 "Value": [
                     project_name, sitemap_url, scan_datetime, current_stats['total_pages'],
                     current_stats['pages_with_broken_links'], current_stats['pages_with_broken_images'],
                     current_stats['broken_links'], current_stats['broken_images'],
                     current_stats['noindex_nofollow_count'],
-                    f"{scan_time:.2f}"
+                    f"{scan_time:.2f}",
+                    "EMPTY - No URLs found" if current_stats['total_pages'] == 0 else "PROCESSED"
                 ]
             }
             
@@ -1278,45 +1292,55 @@ def save_report(results: List[PageResult], sitemap_url: str, output_dir: str,
                 df_comparison = pd.DataFrame(comparison_data)
                 df_comparison.to_excel(writer, sheet_name='Scan Comparison', index=False)
             
-            pages_data = []
-            for r in results:
-                pages_data.append({
-                    "URL": r.url,
-                    "Page Status Code": r.response_code,
-                    "Robots Meta Tag": r.robots_meta if r.robots_meta else "Not Found",
-                    "Broken Links Count": len(r.broken_links),
-                    "Broken Images Count": len(r.broken_images)
+            # Only add other sheets if there are results
+            if results:
+                pages_data = []
+                for r in results:
+                    pages_data.append({
+                        "URL": r.url,
+                        "Page Status Code": r.response_code,
+                        "Robots Meta Tag": r.robots_meta if r.robots_meta else "Not Found",
+                        "Broken Links Count": len(r.broken_links),
+                        "Broken Images Count": len(r.broken_images)
+                    })
+                
+                if pages_data:
+                    pd.DataFrame(pages_data).to_excel(writer, sheet_name='Pages Overview', index=False)
+                
+                broken_links = []
+                for r in results:
+                    for link in r.broken_links:
+                        broken_links.append({
+                            "Page URL": r.url,
+                            "Link URL": link.url,
+                            "Status Code": link.status_code,
+                            "Link Text": link.text[:100]
+                        })
+                
+                if broken_links:
+                    pd.DataFrame(broken_links).to_excel(writer, sheet_name='Broken Links', index=False)
+                
+                broken_images = []
+                for r in results:
+                    for img in r.broken_images:
+                        broken_images.append({
+                            "Page URL": r.url,
+                            "Image URL": img.url,
+                            "Status Code": img.status_code,
+                            "Alt Text": img.text[:100],
+                            "Next Tag Content": img.next_tag_data[:200] if img.next_tag_data else ""
+                        })
+                
+                if broken_images:
+                    pd.DataFrame(broken_images).to_excel(writer, sheet_name='Broken Images', index=False)
+            else:
+                # Add empty sheet with message for empty sitemaps
+                empty_df = pd.DataFrame({
+                    "Message": [f"No URLs found in sitemap: {sitemap_url}"],
+                    "Scan Time": [f"{scan_time:.2f} minutes"],
+                    "Scan Date": [scan_datetime]
                 })
-            
-            if pages_data:
-                pd.DataFrame(pages_data).to_excel(writer, sheet_name='Pages Overview', index=False)
-            
-            broken_links = []
-            for r in results:
-                for link in r.broken_links:
-                    broken_links.append({
-                        "Page URL": r.url,
-                        "Link URL": link.url,
-                        "Status Code": link.status_code,
-                        "Link Text": link.text[:100]
-                    })
-            
-            if broken_links:
-                pd.DataFrame(broken_links).to_excel(writer, sheet_name='Broken Links', index=False)
-            
-            broken_images = []
-            for r in results:
-                for img in r.broken_images:
-                    broken_images.append({
-                        "Page URL": r.url,
-                        "Image URL": img.url,
-                        "Status Code": img.status_code,
-                        "Alt Text": img.text[:100],
-                        "Next Tag Content": img.next_tag_data[:200] if img.next_tag_data else ""
-                    })
-            
-            if broken_images:
-                pd.DataFrame(broken_images).to_excel(writer, sheet_name='Broken Images', index=False)
+                empty_df.to_excel(writer, sheet_name='Empty Sitemap', index=False)
             
             workbook = writer.book
             
